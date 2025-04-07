@@ -201,13 +201,25 @@ class GeminiProvider(BaseAIProvider):
             # Improve table detection
             # First, try to find the header row by looking for common header patterns
             header_row_index = None
+            
+            # Look for rows that contain all the expected headers
+            expected_headers = ["STT", "Họ và Tên", "MSSV", "Lớp", "SDT"]
             for i in range(min(10, len(excel_data))):  # Check first 10 rows
-                row = excel_data.iloc[i]
-                # Check if this row has values that look like headers (non-numeric, not empty)
-                if all(isinstance(val, str) and val.strip() and not val.replace('.', '').isdigit() 
-                      for val in row if pd.notna(val)):
+                row_values = [str(val).strip() if pd.notna(val) else "" for val in excel_data.iloc[i]]
+                # Check if this row contains all expected headers
+                if all(header in row_values for header in expected_headers):
                     header_row_index = i
                     break
+            
+            # If no header row found with expected headers, try common patterns
+            if header_row_index is None:
+                for i in range(min(10, len(excel_data))):  # Check first 10 rows
+                    row = excel_data.iloc[i]
+                    # Check if this row has values that look like headers (non-numeric, not empty)
+                    if all(isinstance(val, str) and val.strip() and not val.replace('.', '').isdigit() 
+                          for val in row if pd.notna(val)):
+                        header_row_index = i
+                        break
             
             # If no header row found, use the first non-empty row
             if header_row_index is None:
@@ -223,11 +235,11 @@ class GeminiProvider(BaseAIProvider):
             
             # Extract headers from the identified header row
             headers = []
-            for col in excel_data.columns:
-                val = excel_data.iloc[header_row_index, col]
+            for col_idx in range(len(excel_data.columns)):
+                val = excel_data.iloc[header_row_index, col_idx]
                 if pd.isna(val) or val == '':
                     # If header is empty, use a generic name
-                    headers.append(f"Column_{col+1}")
+                    headers.append(f"Column_{col_idx+1}")
                 else:
                     headers.append(str(val).strip())
             
@@ -238,6 +250,11 @@ class GeminiProvider(BaseAIProvider):
             
             # Remove rows where all values are NaN
             clean_data = clean_data.dropna(how='all')
+            
+            # Remove rows that look like headers or titles
+            clean_data = clean_data[~clean_data.apply(lambda row: 
+                all(isinstance(val, str) and val.strip() and not val.replace('.', '').isdigit() 
+                    for val in row if pd.notna(val)), axis=1)]
             
             # Extract table structure
             table_info = {
@@ -251,10 +268,10 @@ class GeminiProvider(BaseAIProvider):
             max_rows_to_include = min(100, len(clean_data))
             for i in range(max_rows_to_include):
                 row_data = {}
-                for col in clean_data.columns:
-                    val = clean_data.iloc[i][col]
+                for col_idx, col_name in enumerate(clean_data.columns):
+                    val = clean_data.iloc[i, col_idx]
                     # Convert NaN to null for JSON
-                    row_data[col] = None if pd.isna(val) else val
+                    row_data[col_name] = None if pd.isna(val) else val
                 table_info["data"].append(row_data)
             
             # If a prompt is provided, use the AI to analyze the data
