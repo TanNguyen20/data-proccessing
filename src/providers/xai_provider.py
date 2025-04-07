@@ -371,23 +371,26 @@ class XAIProvider(BaseAIProvider):
                 
                 full_prompt = f"{prompt}\n\n{table_summary}Sample data (first 5 rows):\n{sample_data_str}"
                 
-                messages = [
-                    {
-                        "role": "user",
-                        "content": full_prompt
-                    }
-                ]
-
-                completion = self.client.chat.completions.create(
-                    model=kwargs.get('model', XAI_DEFAULT_MODEL),
-                    messages=messages,
-                    temperature=kwargs.get('temperature', 0.7),
-                    max_tokens=kwargs.get('max_tokens', 1000)
+                # Use the model specified in the request body
+                model_name = kwargs.get('model', XAI_DEFAULT_MODEL)
+                temperature = kwargs.get('temperature', 0.7)
+                max_tokens = kwargs.get('max_tokens', 1000)
+                
+                response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": full_prompt
+                        }
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens
                 )
                 
                 return {
                     "table": table_info,
-                    "analysis": completion.choices[0].message.content
+                    "analysis": response.choices[0].message.content
                 }
             
             # If no prompt, just return the table structure

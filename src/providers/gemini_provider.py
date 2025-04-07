@@ -286,8 +286,19 @@ class GeminiProvider(BaseAIProvider):
                 
                 full_prompt = f"{prompt}\n\n{table_summary}Sample data (first 5 rows):\n{sample_data_str}"
                 
-                model = self.genai.GenerativeModel(kwargs.get('model', GEMINI_DEFAULT_MODEL))
-                response = model.generate_content(full_prompt)
+                # Use the model specified in the request body
+                model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
+                temperature = kwargs.get('temperature', 0.7)
+                max_tokens = kwargs.get('max_tokens', 1000)
+                
+                model = self.genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=temperature,
+                        max_output_tokens=max_tokens
+                    )
+                )
                 
                 return {
                     "table": table_info,

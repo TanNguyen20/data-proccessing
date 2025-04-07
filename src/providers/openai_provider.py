@@ -320,6 +320,11 @@ class OpenAIProvider(BaseAIProvider):
                 
                 full_prompt = f"{prompt}\n\n{table_summary}Sample data (first 5 rows):\n{sample_data_str}"
                 
+                # Use the model specified in the request body
+                model_name = kwargs.get('model', OPENAI_DEFAULT_MODEL)
+                temperature = kwargs.get('temperature', 0.7)
+                max_tokens = kwargs.get('max_tokens', 1000)
+                
                 messages = [
                     {
                         "role": "user",
@@ -328,10 +333,10 @@ class OpenAIProvider(BaseAIProvider):
                 ]
 
                 completion = self.client.chat.completions.create(
-                    model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
+                    model=model_name,
                     messages=messages,
-                    temperature=kwargs.get('temperature', 0.7),
-                    max_tokens=kwargs.get('max_tokens', 1000)
+                    temperature=temperature,
+                    max_tokens=max_tokens
                 )
                 
                 return {
