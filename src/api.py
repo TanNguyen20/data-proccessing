@@ -6,9 +6,11 @@ from typing import List, Dict, Any, Optional
 from functools import wraps
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
@@ -38,6 +40,12 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
+
+# Setup templates
+templates = Jinja2Templates(directory="src/templates")
 
 # Base request model with common fields
 class BaseAIRequest(BaseModel):
@@ -116,9 +124,9 @@ def get_processor(provider: str = Query("xai", description="AI provider to use")
         raise HTTPException(status_code=400, detail=str(e))
 
 # Routes
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Multi-AI Provider Data Processing API"}
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/providers")
 async def get_providers():
@@ -231,42 +239,95 @@ async def get_embedding(
     embedding = processor.get_embedding(text)
     return {"embedding": embedding}
 
-@app.post("/process-excel-url/", response_model=Dict[str, Any])
+@app.post("/process-excel-file")
+@handle_ai_errors
+async def process_excel_file(
+    excel_file: UploadFile = File(...),
+    provider: Optional[str] = None,
+    prompt: Optional[str] = None,
+    temperature: Optional[float] = 0.7,
+    max_tokens: Optional[int] = 1000
+):
+    """
+    Process an Excel file uploaded by the user.
+    
+    Args:
+        excel_file: The Excel file to process
+        provider: The AI provider to use (xai, openai, gemini)
+        prompt: Optional prompt to guide the analysis
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        The processed Excel data and analysis
+    """
+    try:
+        # Save the uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
+            # Write the uploaded file content to the temporary file
+            content = await excel_file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        # Prepare kwargs for the processor
+        kwargs = {}
+        if provider:
+            kwargs["provider"] = provider
+        if prompt:
+            kwargs["prompt"] = prompt
+        if temperature:
+            kwargs["temperature"] = temperature
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        
+        # Process the Excel file
+        processor = AIProcessor(provider=provider if provider else "xai")
+        result = await processor.process_excel(temp_file_path, **kwargs)
+        
+        # Clean up the temporary file
+        os.unlink(temp_file_path)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-excel-url/")
 @handle_ai_errors
 async def process_excel_url(request: ExcelUrlRequest):
-    processor = AIProcessor()
-    result = await processor.process_excel_url(
-        excel_url=str(request.excel_url),
-        provider=request.provider,
-        model=request.model,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        prompt=request.prompt
-    )
-    return result
+    """
+    Process an Excel file from a URL.
+    
+    Args:
+        request: The request containing:
+            - excel_url: The URL of the Excel file or Google Sheet
+            - provider: The AI provider to use (xai, openai, gemini)
+            - prompt: Optional prompt to guide the analysis
+            - temperature: Temperature for the AI model (0.0 to 1.0)
+            - max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        The processed Excel data and analysis
+    """
+    try:
+        processor = AIProcessor(provider=request.provider)
+        result = await processor.process_excel_url(
+            str(request.excel_url),
+            prompt=request.prompt,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Error handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    # Get the full traceback
-    error_traceback = traceback.format_exc()
-    
-    # Log the error
-    logger.error(
-        f"Unhandled exception:\n"
-        f"Path: {request.url.path}\n"
-        f"Method: {request.method}\n"
-        f"Error: {str(exc)}\n"
-        f"Traceback:\n{error_traceback}"
-    )
-    
     return JSONResponse(
         status_code=500,
         content={
-            "detail": {
-                "message": str(exc),
-                "error_type": exc.__class__.__name__,
-                "traceback": error_traceback
-            }
+            "message": str(exc),
+            "error_type": exc.__class__.__name__,
+            "traceback": traceback.format_exc()
         }
     )

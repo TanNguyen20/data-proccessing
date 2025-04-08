@@ -1,4 +1,7 @@
-from typing import Union, Dict, List, Any
+from typing import Union, Dict, List, Any, Optional
+from fastapi import UploadFile
+import os
+import tempfile
 
 from .config import DEFAULT_PROVIDER
 from .extractors.excel_extractor import ExcelExtractor
@@ -6,7 +9,6 @@ from .extractors.facebook_extractor import FacebookExtractor
 from .providers.gemini_provider import GeminiProvider
 from .providers.openai_provider import OpenAIProvider
 from .providers.xai_provider import XAIProvider
-
 
 class AIProcessor:
     def __init__(self, provider: str = DEFAULT_PROVIDER):
@@ -28,12 +30,19 @@ class AIProcessor:
         provider.initialize()
         return provider
 
-    async def process_excel(self, file_path_or_url: str, **kwargs) -> Union[Dict, List[Dict]]:
-        """Process Excel file and analyze its contents using AI"""
+    async def process_excel(self, excel_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process Excel file using AI"""
         try:
-            return await self.provider.process_excel(file_path_or_url, **kwargs)
+            # Check if provider is specified in kwargs and is different from current provider
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+                # Initialize a new provider with the specified provider name
+                self.provider = self._initialize_provider(kwargs['provider'])
+                # Remove provider from kwargs to avoid passing it to the provider method
+                del kwargs['provider']
+            
+            return await self.provider.process_excel(excel_file, **kwargs)
         except Exception as e:
-            raise Exception(f"Error processing Excel: {str(e)}")
+            raise Exception(f"Error processing Excel file: {str(e)}")
 
     async def process_image(self, image_path: str, **kwargs) -> str:
         """Process image using AI vision capabilities"""
@@ -66,41 +75,16 @@ class AIProcessor:
     async def process_excel_url(self, excel_url: str, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using AI"""
         try:
-            if 'provider' in kwargs:
+            # Check if provider is specified in kwargs and is different from current provider
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+                # Initialize a new provider with the specified provider name
+                self.provider = self._initialize_provider(kwargs['provider'])
+                # Remove provider from kwargs to avoid passing it to the provider method
                 del kwargs['provider']
+            
             return await self.provider.process_excel_url(excel_url, **kwargs)
         except Exception as e:
             raise Exception(f"Error processing Excel URL: {str(e)}")
 
-
-async def main():
-    # Example usage
-    processor = AIProcessor(provider='xai')  # Using xAI as the default provider
-
-    # Process Excel file
-    result = await processor.process_excel('path/to/excel.xlsx')
-    print("Excel Analysis:", result)
-
-    # Process image
-    image_analysis = await processor.process_image('path/to/image.jpg')
-    print("Image Analysis:", image_analysis)
-
-    # Process text
-    text_analysis = await processor.process_text("Analyze this text")
-    print("Text Analysis:", text_analysis)
-
-    # Process Facebook post
-    facebook_post_analysis = await processor.process_facebook_post('https://www.facebook.com/example/post/123456789')
-    print("Facebook Post Analysis:", facebook_post_analysis)
-
-    # Process Facebook page
-    facebook_page_analysis = await processor.process_facebook_page('https://www.facebook.com/example')
-    print("Facebook Page Analysis:", facebook_page_analysis)
-    
-    # Process Excel URL
-    excel_url_analysis = await processor.process_excel_url('https://example.com/data.xlsx')
-    print("Excel URL Analysis:", excel_url_analysis)
-
-
-if __name__ == "__main__":
-    main()
+# Initialize the AI processor
+processor = AIProcessor()
