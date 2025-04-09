@@ -7,6 +7,7 @@ from io import BytesIO
 import tempfile
 import os
 import numpy as np
+import re
 
 import google.generativeai as genai
 from PIL import Image
@@ -105,8 +106,9 @@ class GeminiProvider(BaseAIProvider):
             analysis_prompt = prompt or "Analyze this Excel data and provide insights."
             full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
             
-            # Use the standard text completion API
-            model = self.model
+            # Use the Gemini model to analyze the data
+            model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+            model = self.client.get_model(model_name)
             response = model.generate_content(full_prompt)
             
             # Return both the analysis and the structured data
@@ -124,8 +126,6 @@ class GeminiProvider(BaseAIProvider):
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
                 # Extract the spreadsheet ID from the URL
-                import re
-                # Handle various Google Sheets URL formats
                 patterns = [
                     r'/d/([a-zA-Z0-9-_]+)',  # Standard format
                     r'id=([a-zA-Z0-9-_]+)',  # Sharing format
@@ -150,13 +150,25 @@ class GeminiProvider(BaseAIProvider):
                 
                 for format in export_formats:
                     try:
+                        # Try direct export URL
                         export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format={format}"
                         response = requests.get(export_url)
+                        
                         if response.status_code == 200:
                             excel_data = response.content
                             break
+                        else:
+                            # Try alternative export URL format
+                            alt_export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:{format}"
+                            alt_response = requests.get(alt_export_url)
+                            
+                            if alt_response.status_code == 200:
+                                excel_data = alt_response.content
+                                break
+                            else:
+                                last_error = f"HTTP {response.status_code} for {format} format"
                     except Exception as e:
-                        last_error = e
+                        last_error = str(e)
                         continue
                 
                 if not excel_data:
@@ -204,7 +216,8 @@ class GeminiProvider(BaseAIProvider):
                     full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
                     
                     # Use the Gemini model to analyze the data
-                    model = self.client.get_model(kwargs.get('model', GEMINI_DEFAULT_MODEL))
+                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+                    model = self.client.get_model(model_name)
                     response = model.generate_content(full_prompt)
                     
                     # Return both the analysis and the structured data
@@ -268,7 +281,8 @@ class GeminiProvider(BaseAIProvider):
                     full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
                     
                     # Use the Gemini model to analyze the data
-                    model = self.client.get_model(kwargs.get('model', GEMINI_DEFAULT_MODEL))
+                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+                    model = self.client.get_model(model_name)
                     response = model.generate_content(full_prompt)
                     
                     # Return both the analysis and the structured data

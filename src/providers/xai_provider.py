@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import tempfile
 import os
 import numpy as np
+import re
 
 from openai import OpenAI
 
@@ -38,7 +39,7 @@ class XAIProvider(BaseAIProvider):
             messages.append({"role": "user", "content": text})
 
             completion = self.client.chat.completions.create(
-                model=kwargs.get('model', XAI_DEFAULT_MODEL),
+                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
                 messages=messages,
                 temperature=kwargs.get('temperature', 0.7),
                 max_tokens=kwargs.get('max_tokens', 1000)
@@ -163,7 +164,7 @@ class XAIProvider(BaseAIProvider):
             ]
 
             completion = self.client.chat.completions.create(
-                model=kwargs.get('model', XAI_DEFAULT_MODEL),
+                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
                 messages=messages,
                 temperature=kwargs.get('temperature', 0.7),
                 max_tokens=kwargs.get('max_tokens', 1000)
@@ -179,7 +180,6 @@ class XAIProvider(BaseAIProvider):
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
                 # Extract the spreadsheet ID from the URL
-                import re
                 # Handle various Google Sheets URL formats
                 patterns = [
                     r'/d/([a-zA-Z0-9-_]+)',  # Standard format
@@ -205,13 +205,25 @@ class XAIProvider(BaseAIProvider):
                 
                 for format in export_formats:
                     try:
+                        # Try direct export URL
                         export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format={format}"
                         response = requests.get(export_url)
+                        
                         if response.status_code == 200:
                             excel_data = response.content
                             break
+                        else:
+                            # Try alternative export URL format
+                            alt_export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:{format}"
+                            alt_response = requests.get(alt_export_url)
+                            
+                            if alt_response.status_code == 200:
+                                excel_data = alt_response.content
+                                break
+                            else:
+                                last_error = f"HTTP {response.status_code} for {format} format"
                     except Exception as e:
-                        last_error = e
+                        last_error = str(e)
                         continue
                 
                 if not excel_data:
@@ -260,7 +272,7 @@ class XAIProvider(BaseAIProvider):
                     
                     # Use the standard text completion API
                     response = self.client.chat.completions.create(
-                        model=kwargs.get('model', XAI_DEFAULT_MODEL),
+                        model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
                         messages=[{"role": "user", "content": full_prompt}],
                         temperature=kwargs.get('temperature', 0.7),
                         max_tokens=kwargs.get('max_tokens', 1000)
@@ -328,7 +340,7 @@ class XAIProvider(BaseAIProvider):
                     
                     # Use the standard text completion API
                     response = self.client.chat.completions.create(
-                        model=kwargs.get('model', XAI_DEFAULT_MODEL),
+                        model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
                         messages=[{"role": "user", "content": full_prompt}],
                         temperature=kwargs.get('temperature', 0.7),
                         max_tokens=kwargs.get('max_tokens', 1000)

@@ -301,6 +301,7 @@ async def process_excel_url(request: ExcelUrlRequest):
         request: The request containing:
             - excel_url: The URL of the Excel file or Google Sheet
             - provider: The AI provider to use (xai, openai, gemini)
+            - model: The model to use
             - prompt: Optional prompt to guide the analysis
             - temperature: Temperature for the AI model (0.0 to 1.0)
             - max_tokens: Maximum number of tokens to generate
@@ -313,6 +314,7 @@ async def process_excel_url(request: ExcelUrlRequest):
         result = await processor.process_excel_url(
             str(request.excel_url),
             prompt=request.prompt,
+            model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens
         )
