@@ -111,205 +111,111 @@ class OpenAIProvider(BaseAIProvider):
             analysis_prompt = prompt or "Analyze this Excel data and provide insights."
             full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
             
-            # Use the standard text completion API
-            completion = self.client.chat.completions.create(
-                model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
-                messages=[{"role": "user", "content": full_prompt}],
-                temperature=kwargs.get('temperature', 0.7),
-                max_tokens=kwargs.get('max_tokens', 1000)
+            # Use the OpenAI model to analyze the data
+            model_name = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
+            response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
+                    {"role": "user", "content": full_prompt}
+                ]
             )
             
             # Return both the analysis and the structured data
             return {
-                "analysis": completion.choices[0].message.content,
+                "analysis": response.choices[0].message.content,
                 "data": df.to_dict(orient='records')
             }
 
         except Exception as e:
             raise Exception(f"Error processing Excel with OpenAI: {str(e)}")
             
-    async def process_excel_url(self, url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
-        """Process Excel file from URL using OpenAI"""
+    async def process_excel(self, file_path: str, **kwargs) -> Dict[str, Any]:
+        """
+        Process Excel file.
+        
+        Args:
+            file_path: Path to the Excel file
+            **kwargs: Additional arguments including model and prompt
+            
+        Returns:
+            Dictionary containing processed data and analysis
+        """
         try:
-            # Check if the URL is a Google Sheets URL
-            if "docs.google.com/spreadsheets" in url:
-                # Handle various Google Sheets URL formats
-                patterns = [
-                    r'/d/([a-zA-Z0-9-_]+)',  # Standard format
-                    r'id=([a-zA-Z0-9-_]+)',  # Sharing format
-                    r'spreadsheets/d/([a-zA-Z0-9-_]+)',  # Alternative format
-                    r'/([a-zA-Z0-9-_]{25,})'  # Fallback for long IDs
-                ]
-                
-                spreadsheet_id = None
-                for pattern in patterns:
-                    match = re.search(pattern, url)
-                    if match:
-                        spreadsheet_id = match.group(1)
-                        break
-                
-                if not spreadsheet_id:
-                    raise Exception("Could not extract spreadsheet ID from Google Sheets URL")
-                
-                # Try different export formats and methods
-                export_formats = ['csv', 'xlsx']
-                excel_data = None
-                last_error = None
-                
-                for format in export_formats:
-                    try:
-                        # Try direct export URL
-                        export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format={format}"
-                        response = requests.get(export_url)
-                        
-                        if response.status_code == 200:
-                            excel_data = response.content
-                            break
-                        else:
-                            # Try alternative export URL format
-                            alt_export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:{format}"
-                            alt_response = requests.get(alt_export_url)
-                            
-                            if alt_response.status_code == 200:
-                                excel_data = alt_response.content
-                                break
-                            else:
-                                last_error = f"HTTP {response.status_code} for {format} format"
-                    except Exception as e:
-                        last_error = str(e)
-                        continue
-                
-                if not excel_data:
-                    raise Exception(f"Failed to download Google Sheet data: {last_error}")
-                
-                # Save the downloaded data to a temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{export_formats[0]}") as temp_file:
-                    temp_file.write(excel_data)
-                    temp_file_path = temp_file.name
-                
-                try:
-                    # Try to read the file as CSV first
-                    try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
-                        
-                        for engine in engines:
-                            try:
-                                df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
-                        
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
-                    
-                    # Clean the data by replacing special float values
-                    df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
-                    df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
-                    
-                    # Convert float columns to handle out-of-range values
-                    for col in df.select_dtypes(include=['float64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
-                    # Convert DataFrame to a string representation
-                    excel_str = df.to_string()
-                    
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
-                    # Use the standard text completion API
-                    response = self.client.chat.completions.create(
-                        model=kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL,
-                        messages=[{"role": "user", "content": full_prompt}],
-                        temperature=kwargs.get('temperature', 0.7),
-                        max_tokens=kwargs.get('max_tokens', 1000)
-                    )
-                    
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.choices[0].message.content,
-                        "data": df.to_dict(orient='records')
-                    }
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(temp_file_path)
-            else:
-                # For regular Excel URLs, download the file
-                response = requests.get(url)
-                if response.status_code != 200:
-                    raise Exception(f"Failed to download Excel file: HTTP {response.status_code}")
-                
-                # Determine file type from content or URL
-                content_type = response.headers.get('Content-Type', '')
-                file_extension = url.split('.')[-1].lower() if '.' in url else ''
-                
-                # Save the downloaded data to a temporary file
-                suffix = ".csv" if (content_type == 'text/csv' or file_extension == 'csv') else ".xlsx"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                    temp_file.write(response.content)
-                    temp_file_path = temp_file.name
-                
-                try:
-                    # Try to read the file as CSV first
-                    try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
-                        
-                        for engine in engines:
-                            try:
-                                df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
-                        
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
-                    
-                    # Clean the data by replacing special float values
-                    df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
-                    df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
-                    
-                    # Convert float columns to handle out-of-range values
-                    for col in df.select_dtypes(include=['float64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
-                    # Convert DataFrame to a string representation
-                    excel_str = df.to_string()
-                    
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
-                    # Use the standard text completion API
-                    response = self.client.chat.completions.create(
-                        model=kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL,
-                        messages=[{"role": "user", "content": full_prompt}],
-                        temperature=kwargs.get('temperature', 0.7),
-                        max_tokens=kwargs.get('max_tokens', 1000)
-                    )
-                    
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.choices[0].message.content,
-                        "data": df.to_dict(orient='records')
-                    }
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(temp_file_path)
-
+            # Process the Excel file
+            result = ExcelProcessor.process_excel(file_path)
+            
+            # Get the model from kwargs or use default
+            model = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
+            
+            # Construct the prompt for analysis
+            prompt = kwargs.get('prompt', '')
+            if not prompt:
+                prompt = f"""Analyze the following data and provide insights:
+                Columns: {', '.join(result['columns'])}
+                Number of rows: {len(result['data'])}
+                """
+            
+            # Get analysis from OpenAI
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=kwargs.get('temperature', 0.7),
+                max_tokens=kwargs.get('max_tokens', 1000)
+            )
+            
+            # Add analysis to result
+            result['analysis'] = response.choices[0].message.content
+            
+            return result
+            
         except Exception as e:
-            raise Exception(f"Error processing Excel URL with OpenAI: {str(e)}")
+            raise Exception(f"Error processing Excel file: {str(e)}")
+            
+    async def process_excel_url(self, url: str, **kwargs) -> Dict[str, Any]:
+        """
+        Process Excel file from URL.
+        
+        Args:
+            url: URL of the Excel file
+            **kwargs: Additional arguments including model and prompt
+            
+        Returns:
+            Dictionary containing processed data and analysis
+        """
+        try:
+            # Download the Excel file
+            file_path, content_type = ExcelProcessor.download_excel(url)
+            
+            # Process the Excel file
+            result = ExcelProcessor.process_excel(file_path, content_type)
+            
+            # Get the model from kwargs or use default
+            model = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
+            
+            # Construct the prompt for analysis
+            prompt = kwargs.get('prompt', '')
+            if not prompt:
+                prompt = f"""Analyze the following data and provide insights:
+                Columns: {', '.join(result['columns'])}
+                Number of rows: {len(result['data'])}
+                """
+            
+            # Get analysis from OpenAI
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=kwargs.get('temperature', 0.7),
+                max_tokens=kwargs.get('max_tokens', 1000)
+            )
+            
+            # Add analysis to result
+            result['analysis'] = response.choices[0].message.content
+            
+            return result
+            
+        except Exception as e:
+            raise Exception(f"Error processing Excel URL: {str(e)}")
             
     async def process_facebook_post(self, post_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Facebook post using OpenAI"""

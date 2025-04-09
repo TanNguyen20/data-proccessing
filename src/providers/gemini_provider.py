@@ -85,38 +85,35 @@ class GeminiProvider(BaseAIProvider):
         """Get list of available Gemini models"""
         return ['gemini-pro', 'gemini-pro-vision']
         
-    async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
+    async def process_excel(self, file_path: str, **kwargs) -> Dict[str, Any]:
         """Process Excel file using Gemini"""
         try:
-            # Read Excel file into a pandas DataFrame
-            df = pd.read_excel(file_path)
-            
-            # Clean the data by replacing special float values
-            df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
-            df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
-            
-            # Convert float columns to handle out-of-range values
-            for col in df.select_dtypes(include=['float64']).columns:
-                df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-            
-            # Convert DataFrame to a string representation
-            excel_str = df.to_string()
-            
-            # Create a prompt that includes the Excel data
-            analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-            full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-            
-            # Use the Gemini model to analyze the data
-            model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-            model = self.client.get_model(model_name)
-            response = model.generate_content(full_prompt)
-            
-            # Return both the analysis and the structured data
-            return {
-                "analysis": response.text,
-                "data": df.to_dict(orient='records')
-            }
+            # Read Excel file content
+            with open(file_path, "rb") as excel_file:
+                base64_excel = base64.b64encode(excel_file.read()).decode('utf-8')
 
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": kwargs.get('prompt', "Analyze this Excel file and provide insights.")},
+                        {
+                            "type": "file_url",
+                            "file_url": {
+                                "url": f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64_excel}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            completion = self.client.chat.completions.create(
+                model=kwargs.get('model', GEMINI_DEFAULT_MODEL),
+                messages=messages,
+                temperature=kwargs.get('temperature', 0.7),
+                max_tokens=kwargs.get('max_tokens', 1000)
+            )
+            return {"analysis": completion.choices[0].message.content}
         except Exception as e:
             raise Exception(f"Error processing Excel with Gemini: {str(e)}")
             
@@ -165,134 +162,40 @@ class GeminiProvider(BaseAIProvider):
                             if alt_response.status_code == 200:
                                 excel_data = alt_response.content
                                 break
-                            else:
-                                last_error = f"HTTP {response.status_code} for {format} format"
                     except Exception as e:
                         last_error = str(e)
-                        continue
                 
                 if not excel_data:
-                    raise Exception(f"Failed to download Google Sheet data: {last_error}")
+                    raise Exception(f"Error downloading Excel data: {last_error}")
                 
-                # Save the downloaded data to a temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{export_formats[0]}") as temp_file:
-                    temp_file.write(excel_data)
-                    temp_file_path = temp_file.name
+                # Process the Excel data
+                df = pd.read_excel(BytesIO(excel_data))
                 
-                try:
-                    # Try to read the file as CSV first
-                    try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
-                        
-                        for engine in engines:
-                            try:
-                                df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
-                        
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
-                    
-                    # Clean the data by replacing special float values
-                    df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
-                    df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
-                    
-                    # Convert float columns to handle out-of-range values
-                    for col in df.select_dtypes(include=['float64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
-                    # Convert DataFrame to a string representation
-                    excel_str = df.to_string()
-                    
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
-                    # Use the Gemini model to analyze the data
-                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-                    model = self.client.get_model(model_name)
-                    response = model.generate_content(full_prompt)
-                    
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.text,
-                        "data": df.to_dict(orient='records')
-                    }
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(temp_file_path)
-            else:
-                # For regular Excel URLs, download the file
-                response = requests.get(url)
-                if response.status_code != 200:
-                    raise Exception(f"Failed to download Excel file: HTTP {response.status_code}")
+                # Clean the data by replacing special float values
+                df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
+                df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
                 
-                # Determine file type from content or URL
-                content_type = response.headers.get('Content-Type', '')
-                file_extension = url.split('.')[-1].lower() if '.' in url else ''
+                # Convert float columns to handle out-of-range values
+                for col in df.select_dtypes(include=['float64']).columns:
+                    df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
                 
-                # Save the downloaded data to a temporary file
-                suffix = ".csv" if (content_type == 'text/csv' or file_extension == 'csv') else ".xlsx"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                    temp_file.write(response.content)
-                    temp_file_path = temp_file.name
+                # Convert DataFrame to a string representation
+                excel_str = df.to_string()
                 
-                try:
-                    # Try to read the file as CSV first
-                    try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
-                        
-                        for engine in engines:
-                            try:
-                                df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
-                        
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
-                    
-                    # Clean the data by replacing special float values
-                    df = df.replace([np.inf, -np.inf], None)  # Replace infinity with None directly
-                    df = df.replace({col: {np.nan: None} for col in df.select_dtypes(include=['float64']).columns})  # Replace NaN with None for float columns
-                    
-                    # Convert float columns to handle out-of-range values
-                    for col in df.select_dtypes(include=['float64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
-                    # Convert DataFrame to a string representation
-                    excel_str = df.to_string()
-                    
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
-                    # Use the Gemini model to analyze the data
-                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-                    model = self.client.get_model(model_name)
-                    response = model.generate_content(full_prompt)
-                    
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.text,
-                        "data": df.to_dict(orient='records')
-                    }
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(temp_file_path)
+                # Create a prompt that includes the Excel data
+                analysis_prompt = prompt or "Analyze this Excel data and provide insights."
+                full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
+                
+                # Use the Gemini model to analyze the data
+                model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+                model = self.client.get_model(model_name)
+                response = model.generate_content(full_prompt)
+                
+                # Return both the analysis and the structured data
+                return {
+                    "analysis": response.text,
+                    "data": df.to_dict(orient='records')
+                }
 
         except Exception as e:
             raise Exception(f"Error processing Excel URL with Gemini: {str(e)}")
