@@ -1,14 +1,13 @@
-from typing import Union, Dict, List, Any, Optional
+from typing import Dict, Any
+
 from fastapi import UploadFile
-import os
-import tempfile
 
 from .config import DEFAULT_PROVIDER
-from .extractors.excel_extractor import ExcelExtractor
 from .extractors.facebook_extractor import FacebookExtractor
 from .providers.gemini_provider import GeminiProvider
 from .providers.openai_provider import OpenAIProvider
 from .providers.xai_provider import XAIProvider
+
 
 class AIProcessor:
     def __init__(self, provider: str = DEFAULT_PROVIDER):
@@ -34,12 +33,13 @@ class AIProcessor:
         """Process Excel file using AI"""
         try:
             # Check if provider is specified in kwargs and is different from current provider
-            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace(
+                    'provider', ''):
                 # Initialize a new provider with the specified provider name
                 self.provider = self._initialize_provider(kwargs['provider'])
                 # Remove provider from kwargs to avoid passing it to the provider method
                 del kwargs['provider']
-            
+
             return await self.provider.process_excel(excel_file, **kwargs)
         except Exception as e:
             raise Exception(f"Error processing Excel file: {str(e)}")
@@ -76,15 +76,17 @@ class AIProcessor:
         """Process Excel file from URL using AI"""
         try:
             # Check if provider is specified in kwargs and is different from current provider
-            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace(
+                    'provider', ''):
                 # Initialize a new provider with the specified provider name
                 self.provider = self._initialize_provider(kwargs['provider'])
                 # Remove provider from kwargs to avoid passing it to the provider method
                 del kwargs['provider']
-            
+
             return await self.provider.process_excel_url(excel_url, **kwargs)
         except Exception as e:
             raise Exception(f"Error processing Excel URL: {str(e)}")
+
 
 # Initialize the AI processor
 processor = AIProcessor()

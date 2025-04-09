@@ -20,6 +20,7 @@ XAI_VISION_MODEL = os.getenv('XAI_VISION_MODEL', "grok-1-vision")
 XAI_EMBEDDING_MODEL = os.getenv('XAI_EMBEDDING_MODEL', "text-embedding-3-small")
 
 # OpenAI Settings
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', "https://api.openai.com/v1")
 OPENAI_DEFAULT_MODEL = os.getenv('OPENAI_DEFAULT_MODEL', "gpt-4o")
 OPENAI_VISION_MODEL = os.getenv('OPENAI_VISION_MODEL', "gpt-4-vision-preview")
 OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', "text-embedding-ada-002")
