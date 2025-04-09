@@ -28,6 +28,7 @@ OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL', "text-embedding-ada
 # Gemini Settings
 GEMINI_DEFAULT_MODEL = os.getenv('GEMINI_DEFAULT_MODEL', "gemini-pro")
 GEMINI_VISION_MODEL = os.getenv('GEMINI_VISION_MODEL', "gemini-pro-vision")
+GEMINI_EMBEDDING_MODEL = os.getenv('GEMINI_EMBEDDING_MODEL', "embedding-001")
 
 # File Processing Settings
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
