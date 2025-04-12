@@ -16,6 +16,7 @@ class AIProcessor:
 
     def _initialize_provider(self, provider_name: str):
         """Initialize the specified AI provider"""
+        provider_name = provider_name.strip().lower()  # Normalize provider name
         providers = {
             'openai': OpenAIProvider,
             'gemini': GeminiProvider,

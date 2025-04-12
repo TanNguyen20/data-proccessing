@@ -396,39 +396,49 @@ class OpenAIProvider(BaseAIProvider):
         except Exception as e:
             raise Exception(f"Error processing Excel URL with OpenAI: {str(e)}")
 
-    def _detect_header_row(self, df: pd.DataFrame, max_rows_to_check: int = 10) -> Optional[int]:
+    def _detect_header_row(self, df: pd.DataFrame, max_rows_to_check: int = 10) -> int:
         """
-        Dynamically detect the header row in a DataFrame.
+        Detect the header row by analyzing data patterns, without making assumptions about specific column names.
         
         Args:
             df: The DataFrame to analyze
             max_rows_to_check: Maximum number of rows to check for header
             
         Returns:
-            The index of the header row, or None if no header row is found
+            The index of the likely header row
         """
-        # First, check if the first row contains valid string headers
-        first_row = df.iloc[0]
-        if all(isinstance(val, str) and len(val.strip()) > 0 for val in first_row if pd.notnull(val)):
+        if df.empty:
             return 0
+
+        # Check the first few rows
+        for i in range(min(max_rows_to_check, len(df))):
+            row = df.iloc[i]
             
-        # Check subsequent rows for valid headers
-        for i in range(1, min(max_rows_to_check, len(df))):
-            row_values = df.iloc[i].values
-            # Check if this row contains mostly string values and has meaningful content
-            string_count = sum(1 for val in row_values if isinstance(val, str) and len(val.strip()) > 0)
-            if string_count >= len(row_values) * 0.7:  # At least 70% of values are strings
-                # Additional check for meaningful header content
-                meaningful_content = any(
-                    isinstance(val, str) and len(val.strip()) > 0
-                    for val in row_values if pd.notnull(val)
-                )
-                if meaningful_content:
-                    return i
+            # Skip completely empty rows
+            if row.isna().all():
+                continue
                 
-        # If no clear header row is found, return None
-        return None
+            # Calculate metrics for this row
+            non_numeric_ratio = sum(1 for val in row if pd.notnull(val) and not str(val).replace('.', '').isdigit()) / len(row)
+            unique_values_ratio = len(set(str(val).strip() for val in row if pd.notnull(val))) / len(row)
+            avg_value_length = sum(len(str(val).strip()) for val in row if pd.notnull(val)) / max(1, sum(pd.notnull(val) for val in row))
+            
+            # A good header row typically has:
+            # 1. High ratio of non-numeric values (column names are usually text)
+            # 2. High ratio of unique values (column names should be unique)
+            # 3. Reasonable average length (not too short, not too long)
+            if (non_numeric_ratio > 0.7 and 
+                unique_values_ratio > 0.8 and 
+                3 <= avg_value_length <= 30):
+                return i
         
+        # If no clear header is found, use the first non-empty row
+        for i in range(min(max_rows_to_check, len(df))):
+            if not df.iloc[i].isna().all():
+                return i
+        
+        return 0
+
     def _handle_merged_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Handle merged cells in the header by splitting long column names.
@@ -458,75 +468,104 @@ class OpenAIProvider(BaseAIProvider):
         
     def _clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Clean column names by removing whitespace and handling duplicates.
-        
-        Args:
-            df: The DataFrame with column names to clean
-            
-        Returns:
-            DataFrame with cleaned column names
+        Minimally clean column names while preserving original names.
+        Only handles empty columns and ensures uniqueness.
         """
-        # Strip whitespace from column names
-        df.columns = [str(col).strip() if isinstance(col, str) else col for col in df.columns]
-        
-        # Handle duplicate column names
-        seen = {}
-        new_columns = []
+        # Drop empty columns
+        df = df.dropna(how='all', axis=1)
+
+        # Clean basic formatting while preserving original names
+        cleaned_columns = []
         for col in df.columns:
-            if col in seen:
-                seen[col] += 1
-                new_columns.append(f"{col}_{seen[col]}")
-            else:
-                seen[col] = 0
-                new_columns.append(col)
-        
-        df.columns = new_columns
+            clean_name = str(col).strip()
+            if not clean_name:  # Only generate generic names for empty columns
+                clean_name = f"column_{len(cleaned_columns)}"
+            cleaned_columns.append(clean_name)
+
+        # Handle duplicate column names if any exist
+        if len(cleaned_columns) != len(set(cleaned_columns)):
+            seen = {}
+            unique_columns = []
+            for col in cleaned_columns:
+                if col in seen:
+                    seen[col] += 1
+                    unique_columns.append(f"{col}_{seen[col]}")
+                else:
+                    seen[col] = 0
+                    unique_columns.append(col)
+            cleaned_columns = unique_columns
+
+        df.columns = cleaned_columns
         return df
         
     def _convert_df_to_json_safe_dict(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
-        Convert DataFrame to a JSON-safe dictionary with proper handling of special values.
-        
-        Args:
-            df: The DataFrame to convert
-            
-        Returns:
-            List of dictionaries representing the DataFrame rows
+        Convert DataFrame to JSON format preserving original column names.
         """
-        # Create a list to store the rows
-        data_dict = []
-        
-        # Get column names, ensuring they are strings and properly formatted
-        columns = [str(col).strip() if isinstance(col, str) else f"Column_{i}" 
-                  for i, col in enumerate(df.columns)]
-        
-        # Iterate through each row in the DataFrame
+        if df.empty:
+            return []
+
+        data = []
         for _, row in df.iterrows():
-            # Create a dictionary for the current row
             row_dict = {}
+            for col_name, value in row.items():
+                # Clean and format value
+                clean_value = str(value).strip() if pd.notnull(value) else None
+                # Use original column name
+                row_dict[str(col_name)] = clean_value
+            data.append(row_dict)
             
-            # Iterate through each column in the row
-            for col_name, val in zip(columns, row):
-                # Clean the column name
-                clean_col_name = col_name.strip()
-                
-                # Handle special values
-                if pd.isna(val) or val is None:
-                    row_dict[clean_col_name] = None
-                elif isinstance(val, (int, float)):
-                    if np.isinf(val) or np.isnan(val):
-                        row_dict[clean_col_name] = None
-                    else:
-                        # Convert numeric values to strings to ensure JSON compatibility
-                        row_dict[clean_col_name] = str(val)
-                else:
-                    # For string values, ensure they are properly formatted
-                    row_dict[clean_col_name] = str(val).strip() if isinstance(val, str) else str(val)
-            
-            # Add the row dictionary to the list
-            data_dict.append(row_dict)
-        
-        return data_dict
+        return data
+
+    def _detect_column_type(self, column_values) -> str:
+        """
+        Detect column type based on data analysis.
+        Returns a type identifier based on data patterns.
+        """
+        values = [str(x).strip() for x in column_values if pd.notnull(x)]
+        if not values:
+            return None
+
+        # Calculate ratios of different patterns in the data
+        patterns = {
+            'numeric': sum(str(v).replace('.', '').isdigit() for v in values) / len(values),
+            'multi_word': sum(len(str(v).split()) > 1 for v in values) / len(values),
+            'class_code': sum(str(v).upper().startswith(('DH', 'TH')) for v in values) / len(values)
+        }
+
+        # Check for sequential numbers
+        if patterns['numeric'] > 0.9:
+            try:
+                nums = [float(v) for v in values]
+                if len(nums) >= 2:
+                    is_sequential = all(abs(nums[i] - nums[i-1]) <= 5 for i in range(1, len(nums)))
+                    if is_sequential:
+                        return 'sequence'
+            except ValueError:
+                pass
+
+        # Check for student ID pattern 
+        if patterns['numeric'] > 0.9 and all(7 <= len(str(v).replace('.', '')) <= 9 for v in values):
+            return 'student_id'
+
+        # Check for class codes
+        if patterns['class_code'] > 0.8:
+            return 'class'
+
+        # Check for phone numbers
+        phone_pattern = sum(
+            (str(v).startswith(('0', '+84', '*')) and len(str(v).replace('+84', '0').replace('*', '').replace(' ', '')) in (9, 10, 11))
+            or (str(v).isdigit() and len(str(v)) in (9, 10))
+            for v in values
+        ) / len(values)
+        if phone_pattern > 0.8:
+            return 'contact'
+
+        # Check for names
+        if patterns['multi_word'] > 0.8:
+            return 'name'
+
+        return None
 
     async def process_facebook_post(self, post_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Facebook post using OpenAI"""
