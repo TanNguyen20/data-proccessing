@@ -144,32 +144,77 @@ class XAIProvider(BaseAIProvider):
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using xAI"""
         try:
-            # Read Excel file content
-            with open(file_path, "rb") as excel_file:
-                base64_excel = base64.b64encode(excel_file.read()).decode('utf-8')
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt or "Analyze this Excel file and provide insights."},
-                        {
-                            "type": "file_url",
-                            "file_url": {
-                                "url": f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64_excel}"
-                            }
-                        }
-                    ]
-                }
-            ]
-
-            completion = self.client.chat.completions.create(
-                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
-                messages=messages,
-                temperature=kwargs.get('temperature', 0.7),
-                max_tokens=kwargs.get('max_tokens', 1000)
+            # Try to read the file as CSV first
+            try:
+                df = pd.read_csv(file_path)
+            except Exception as csv_error:
+                # If CSV reading fails, try Excel engines
+                engines = ['openpyxl', 'xlrd']
+                df = None
+                last_error = None
+                
+                for engine in engines:
+                    try:
+                        df = pd.read_excel(file_path, engine=engine)
+                        break
+                    except Exception as e:
+                        last_error = e
+                        continue
+                
+                if df is None:
+                    raise Exception(f"Failed to read file with any method: {last_error}")
+            
+            # Clean the data by replacing special float values
+            # First, replace infinity values with None
+            df = df.replace([np.inf, -np.inf], None)
+            
+            # Then, replace NaN values with None for all columns
+            df = df.where(pd.notnull(df), None)
+            
+            # Convert all numeric columns to strings to handle any remaining out-of-range values
+            for col in df.select_dtypes(include=['float64', 'int64']).columns:
+                df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
+            
+            # Detect header row dynamically
+            header_row = self._detect_header_row(df)
+            
+            if header_row is not None:
+                # Use this row as the header
+                df.columns = df.iloc[header_row]
+                # Remove the header row and any rows before it
+                df = df.iloc[header_row+1:].reset_index(drop=True)
+            
+            # Handle merged columns in the header
+            df = self._handle_merged_columns(df)
+            
+            # Clean column names
+            df = self._clean_column_names(df)
+            
+            # Convert DataFrame to a string representation for the prompt
+            excel_str = df.to_string()
+            
+            # Create a prompt that includes the Excel data
+            analysis_prompt = prompt or "Analyze this Excel data and provide insights."
+            full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
+            
+            # Use the xAI model to analyze the data
+            model_name = kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL
+            response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
+                    {"role": "user", "content": full_prompt}
+                ]
             )
-            return {"analysis": completion.choices[0].message.content}
+            
+            # Convert DataFrame to dict with proper handling of special values
+            data_dict = self._convert_df_to_json_safe_dict(df)
+            
+            # Return both the analysis and the structured data
+            return {
+                "analysis": response.choices[0].message.content,
+                "data": data_dict
+            }
 
         except Exception as e:
             raise Exception(f"Error processing Excel with xAI: {str(e)}")

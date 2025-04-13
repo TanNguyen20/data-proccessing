@@ -10,7 +10,6 @@ import numpy as np
 import re
 
 import google.generativeai as genai
-from PIL import Image
 
 from .base_provider import BaseAIProvider
 from ..config import GEMINI_API_KEY, GEMINI_DEFAULT_MODEL, GEMINI_VISION_MODEL, GEMINI_EMBEDDING_MODEL
@@ -129,8 +128,25 @@ class GeminiProvider(BaseAIProvider):
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using Gemini"""
         try:
-            # Read Excel file into a pandas DataFrame
-            df = pd.read_excel(file_path)
+            # Try to read the file as CSV first
+            try:
+                df = pd.read_csv(file_path)
+            except Exception as csv_error:
+                # If CSV reading fails, try Excel engines
+                engines = ['openpyxl', 'xlrd']
+                df = None
+                last_error = None
+                
+                for engine in engines:
+                    try:
+                        df = pd.read_excel(file_path, engine=engine)
+                        break
+                    except Exception as e:
+                        last_error = e
+                        continue
+                
+                if df is None:
+                    raise Exception(f"Failed to read file with any method: {last_error}")
             
             # Clean the data by replacing special float values
             # First, replace infinity values with None
