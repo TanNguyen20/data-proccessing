@@ -58,12 +58,6 @@ class BaseAIRequest(BaseModel):
 class TextRequest(BaseAIRequest):
     text: str
 
-class FacebookPostRequest(BaseAIRequest):
-    post_url: HttpUrl
-
-class FacebookPageRequest(BaseAIRequest):
-    page_url: HttpUrl
-
 class TableDataRequest(BaseAIRequest):
     table_data: Dict[str, Any]
 
@@ -145,28 +139,6 @@ async def process_text(request: TextRequest, processor: AIProcessor = Depends(ge
         max_tokens=request.max_tokens
     )
     return {"result": result}
-
-@app.post("/process/facebook/post")
-@handle_ai_errors
-async def process_facebook_post(request: FacebookPostRequest, processor: AIProcessor = Depends(get_processor)):
-    result = processor.process_facebook_post(
-        str(request.post_url),
-        model=request.model,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens
-    )
-    return result
-
-@app.post("/process/facebook/page")
-@handle_ai_errors
-async def process_facebook_page(request: FacebookPageRequest, processor: AIProcessor = Depends(get_processor)):
-    result = processor.process_facebook_page(
-        str(request.page_url),
-        model=request.model,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens
-    )
-    return result
 
 @app.post("/process/table")
 @handle_ai_errors

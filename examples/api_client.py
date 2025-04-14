@@ -27,38 +27,6 @@ def process_text(text, provider="xai", model=None, temperature=0.7, max_tokens=1
     return response.json()
 
 
-def process_facebook_post(post_url, provider="xai", model=None, temperature=0.7, max_tokens=1000):
-    """Process Facebook post using the API"""
-    url = f"{API_URL}/process/facebook/post"
-    payload = {
-        "post_url": post_url,
-        "provider": provider,
-        "model": model,
-        "temperature": temperature,
-        "max_tokens": max_tokens
-    }
-
-    response = requests.post(url, json=payload)
-    response.raise_for_status()
-    return response.json()
-
-
-def process_facebook_page(page_url, provider="xai", model=None, temperature=0.7, max_tokens=1000):
-    """Process Facebook page using the API"""
-    url = f"{API_URL}/process/facebook/page"
-    payload = {
-        "page_url": page_url,
-        "provider": provider,
-        "model": model,
-        "temperature": temperature,
-        "max_tokens": max_tokens
-    }
-
-    response = requests.post(url, json=payload)
-    response.raise_for_status()
-    return response.json()
-
-
 def process_image(image_path, provider="xai", model=None, temperature=0.7, max_tokens=1000):
     """Process image using the API"""
     url = f"{API_URL}/process/image"
@@ -152,24 +120,8 @@ def main():
     except Exception as e:
         print(f"Error processing text: {e}")
 
-    # Example 2: Process Facebook post
-    print("\nExample 2: Process Facebook post")
-    try:
-        result = process_facebook_post("https://www.facebook.com/example/post/123456789")
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(f"Error processing Facebook post: {e}")
-
-    # Example 3: Process Facebook page
-    print("\nExample 3: Process Facebook page")
-    try:
-        result = process_facebook_page("https://www.facebook.com/example")
-        print(json.dumps(result, indent=2))
-    except Exception as e:
-        print(f"Error processing Facebook page: {e}")
-
-    # Example 4: Process table data
-    print("\nExample 4: Process table data")
+    # Example 2: Process table data
+    print("\nExample 2: Process table data")
     try:
         table_data = {
             "columns": ["Name", "Age", "City"],
@@ -184,8 +136,8 @@ def main():
     except Exception as e:
         print(f"Error processing table data: {e}")
 
-    # Example 5: Chat with streaming
-    print("\nExample 5: Chat with streaming")
+    # Example 3: Chat with streaming
+    print("\nExample 3: Chat with streaming")
     try:
         messages = [
             {"role": "system", "content": "You are a helpful AI assistant."},
@@ -195,8 +147,8 @@ def main():
     except Exception as e:
         print(f"Error in chat: {e}")
 
-    # Example 6: Get embedding
-    print("\nExample 6: Get embedding")
+    # Example 4: Get embedding
+    print("\nExample 4: Get embedding")
     try:
         result = get_embedding("This is a sample text for embedding.")
         print(f"Embedding (first 5 values): {result['embedding'][:5]}...")

@@ -5,6 +5,9 @@ from typing import Any, Dict, List
 class BaseAIProvider(ABC):
     """Base class for AI providers"""
 
+    def __init__(self):
+        pass
+
     @abstractmethod
     def initialize(self) -> None:
         """Initialize the AI provider with necessary credentials"""
@@ -43,14 +46,4 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def process_excel_url(self, excel_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using the AI provider"""
-        pass
-        
-    @abstractmethod
-    async def process_facebook_post(self, post_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
-        """Process Facebook post using the AI provider"""
-        pass
-        
-    @abstractmethod
-    async def process_facebook_page(self, page_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
-        """Process Facebook page using the AI provider"""
         pass

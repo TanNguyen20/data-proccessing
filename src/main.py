@@ -3,7 +3,6 @@ from typing import Dict, Any
 from fastapi import UploadFile
 
 from .config import DEFAULT_PROVIDER
-from .extractors.facebook_extractor import FacebookExtractor
 from .providers.gemini_provider import GeminiProvider
 from .providers.openai_provider import OpenAIProvider
 from .providers.xai_provider import XAIProvider
@@ -12,7 +11,6 @@ from .providers.xai_provider import XAIProvider
 class AIProcessor:
     def __init__(self, provider: str = DEFAULT_PROVIDER):
         self.provider = self._initialize_provider(provider)
-        self.facebook_extractor = FacebookExtractor()
 
     def _initialize_provider(self, provider_name: str):
         """Initialize the specified AI provider"""
@@ -58,20 +56,6 @@ class AIProcessor:
             return await self.provider.process_text(text, **kwargs)
         except Exception as e:
             raise Exception(f"Error processing text: {str(e)}")
-
-    async def process_facebook_post(self, post_url: str, **kwargs) -> Dict:
-        """Process Facebook post data using AI"""
-        try:
-            return await self.provider.process_facebook_post(post_url, **kwargs)
-        except Exception as e:
-            raise Exception(f"Error processing Facebook post: {str(e)}")
-
-    async def process_facebook_page(self, page_url: str, **kwargs) -> Dict:
-        """Process Facebook page data using AI"""
-        try:
-            return await self.provider.process_facebook_page(page_url, **kwargs)
-        except Exception as e:
-            raise Exception(f"Error processing Facebook page: {str(e)}")
 
     async def process_excel_url(self, excel_url: str, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using AI"""
