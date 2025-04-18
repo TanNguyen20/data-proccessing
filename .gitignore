@@ -1,2 +1,19 @@
 .qodo
 .env
+
+# Python cache files and directories
+__pycache__/
+*/__pycache__/
+**/__pycache__/
+*.py[cod]
+*/*.py[cod]
+**/*.py[cod]
+*$py.class
+*/*$py.class
+**/*$py.class
+.pytest_cache/
+*/.pytest_cache/
+**/.pytest_cache/
+*.so
+*/*.so
+**/*.so
