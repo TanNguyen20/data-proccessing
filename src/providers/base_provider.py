@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
+from fastapi import UploadFile
 
 
 class BaseAIProvider(ABC):
@@ -46,4 +47,22 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def process_excel_url(self, excel_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using the AI provider"""
+        pass
+        
+    @abstractmethod
+    async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process PDF file using the AI provider
+        
+        Args:
+            pdf_file: The uploaded PDF file
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - table_data: List of extracted and formatted table data
+                - analysis: Overall document analysis
+                - page_count: Number of pages in the PDF
+                - row_count: Total number of rows extracted
+                - headers_by_page: Dictionary of headers found on each page
+        """
         pass

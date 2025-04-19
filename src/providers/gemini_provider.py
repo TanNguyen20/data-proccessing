@@ -1,8 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import base64
 import json
 import pandas as pd
 import requests
+from fastapi import UploadFile
 from io import BytesIO
 import tempfile
 import os
@@ -438,6 +439,284 @@ class GeminiProvider(BaseAIProvider):
         except Exception as e:
             raise Exception(f"Error processing Excel URL with Gemini: {str(e)}")
             
+    async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process PDF file using pdfplumber for table extraction and Gemini for formatting"""
+        try:
+            import pdfplumber
+            import io
+
+            # Read the PDF file content
+            pdf_content = await pdf_file.read()
+            pdf_file_obj = io.BytesIO(pdf_content)
+            
+            all_table_data = []
+            full_text = ""
+            page_headers = {}  # Store headers by page number
+            first_table_headers = None  # Store headers from first table found
+            
+            # Open PDF with pdfplumber
+            with pdfplumber.open(pdf_file_obj) as pdf:
+                # Process each page
+                for page_num, page in enumerate(pdf.pages, 1):
+                    # Extract page text
+                    page_text = page.extract_text() or ""
+                    full_text += page_text + "\n"
+                    
+                    try:
+                        # Extract tables from the page
+                        tables = page.extract_tables()
+                        
+                        if tables:
+                            for table_num, table in enumerate(tables, 1):
+                                # Clean and validate table data
+                                cleaned_table = await self._clean_table_data(table)
+                                
+                                if cleaned_table:
+                                    # Get appropriate headers for this table
+                                    headers, is_header_row = await self._detect_and_validate_headers(
+                                        cleaned_table,
+                                        first_table_headers  # Pass headers from first table as fallback
+                                    )
+                                    
+                                    # Store headers from first table found
+                                    if first_table_headers is None and headers:
+                                        first_table_headers = headers.copy()
+                                    
+                                    # Store headers for this page/table combination
+                                    page_headers[f"page_{page_num}_table_{table_num}"] = headers
+                                    
+                                    # Skip header row if it was detected as a header
+                                    table_data = cleaned_table[1:] if is_header_row else cleaned_table
+                                    
+                                    if table_data:  # Process only if we have data rows
+                                        # Process table data with AI
+                                        formatted_data = await self._format_table_data(
+                                            headers,
+                                            table_data,
+                                            model=kwargs.get('model'),
+                                            temperature=kwargs.get('temperature', 0.2),
+                                            max_tokens=kwargs.get('max_tokens', 2000)
+                                        )
+                                        
+                                        if formatted_data:
+                                            # Add page and table information to each row
+                                            for row in formatted_data:
+                                                row['_page_number'] = page_num
+                                                row['_table_number'] = table_num
+                                            all_table_data.extend(formatted_data)
+                    
+                    except Exception as table_error:
+                        # Log the error but continue processing other tables
+                        print(f"Error processing table on page {page_num}: {str(table_error)}")
+                        continue
+
+            # Get overall analysis using Gemini
+            model = genai.GenerativeModel(kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL)
+            analysis_prompt = """Analyze this document and provide:
+            1. A summary of the key information
+            2. Any patterns or trends identified
+            3. Important data points
+            4. Document structure analysis
+            Make the analysis clear and concise.
+
+            Document content:
+            """ + full_text
+
+            analysis_response = model.generate_content(
+                analysis_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=kwargs.get('temperature', 0.7),
+                    max_output_tokens=kwargs.get('max_tokens', 1000)
+                )
+            )
+
+            return {
+                "table_data": all_table_data,
+                "analysis": analysis_response.text,
+                "page_count": len(pdf.pages),
+                "row_count": len(all_table_data),
+                "headers_by_page": page_headers
+            }
+
+        except Exception as e:
+            raise Exception(f"Error processing PDF with Gemini: {str(e)}")
+
+    async def _clean_table_data(self, table: List[List[Any]]) -> List[List[str]]:
+        """Clean and validate table data before processing"""
+        cleaned_table = []
+        for row in table:
+            # Skip completely empty rows
+            if not any(cell for cell in row if cell is not None):
+                continue
+                
+            cleaned_row = []
+            for cell in row:
+                # Convert cell to string and clean it
+                if cell is None:
+                    cleaned_cell = ""
+                else:
+                    cleaned_cell = str(cell).strip()
+                    cleaned_cell = (cleaned_cell
+                        .replace('"', "'")
+                        .replace('\n', ' ')
+                        .replace('\r', '')
+                        .replace('\t', ' ')
+                        .replace('\\', '/')
+                    )
+                    cleaned_cell = ' '.join(cleaned_cell.split())
+                
+                cleaned_row.append(cleaned_cell)
+            
+            if any(cell for cell in cleaned_row):
+                cleaned_table.append(cleaned_row)
+        
+        return cleaned_table
+
+    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[List[str], bool]:
+        """Detect and validate table headers, using previous headers as fallback"""
+        if not table or not table[0]:
+            return previous_headers or [], False
+
+        first_row = table[0]
+        
+        # Check if first row looks like a header
+        non_empty_cells = [cell for cell in first_row if cell.strip()]
+        if non_empty_cells:
+            # Calculate metrics for header detection
+            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(non_empty_cells)
+            unique_ratio = len(set(non_empty_cells)) / len(non_empty_cells)
+            avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
+            
+            is_header = (non_numeric_ratio > 0.7 and 
+                        unique_ratio > 0.8 and 
+                        3 <= avg_length <= 30)
+            
+            if is_header:
+                # Clean and format headers
+                headers = [
+                    str(cell).strip() or f"Column_{i+1}"
+                    for i, cell in enumerate(first_row)
+                ]
+                
+                # Make headers unique
+                seen_headers = set()
+                unique_headers = []
+                for header in headers:
+                    base_header = header
+                    counter = 1
+                    while header in seen_headers:
+                        header = f"{base_header}_{counter}"
+                        counter += 1
+                    seen_headers.add(header)
+                    unique_headers.append(header)
+                
+                return unique_headers, True
+        
+        # If no valid header detected, use previous headers or generate generic ones
+        if previous_headers and len(previous_headers) >= len(first_row):
+            return previous_headers[:len(first_row)], False
+        else:
+            return [f"Column_{i+1}" for i in range(len(first_row))], False
+
+    async def _format_table_data(self, headers: List[str], rows: List[List[str]], **kwargs) -> List[Dict[str, str]]:
+        """Format extracted table data using Gemini"""
+        try:
+            # Convert the rows to a more structured format
+            formatted_rows = []
+            for row in rows:
+                row_dict = {}
+                for i, value in enumerate(row):
+                    if i < len(headers):
+                        header = headers[i]
+                        cleaned_value = str(value).strip().replace('"', '\\"').replace('\n', ' ').replace('\r', '')
+                        row_dict[header] = cleaned_value
+                formatted_rows.append(row_dict)
+
+            # Create a prompt with pre-formatted data
+            prompt = f"""Format this data as a valid JSON array. Use these exact column headers as keys: {headers}
+
+            Data to format (already in dictionary format):
+            {json.dumps(formatted_rows, ensure_ascii=False, indent=2)}
+
+            Return ONLY the JSON array with proper formatting and escaping. Format example:
+            [
+                {{"column1": "value1", "column2": "value2"}},
+                {{"column1": "value3", "column2": "value4"}}
+            ]"""
+
+            model = genai.GenerativeModel(kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL)
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,  # Very low temperature for consistent formatting
+                    max_output_tokens=kwargs.get('max_tokens', 4000)
+                )
+            )
+
+            try:
+                # Clean and parse the response
+                content = response.text.strip()
+                content = re.sub(r'^```json\s*|\s*```$', '', content)
+                content = content.replace('\n', ' ').replace('\r', '')
+                content = re.sub(r',\s*]', ']', content)
+                content = re.sub(r'\s+', ' ', content)
+                
+                if not content.startswith('['):
+                    array_start = content.find('[')
+                    array_end = content.rfind(']')
+                    if array_start != -1 and array_end != -1:
+                        content = content[array_start:array_end + 1]
+
+                result = json.loads(content)
+
+                if not isinstance(result, list):
+                    if isinstance(result, dict):
+                        for key in ['data', 'rows', 'table', 'results']:
+                            if key in result and isinstance(result[key], list):
+                                result = result[key]
+                                break
+                        if not isinstance(result, list):
+                            result = [result]
+
+                if not result and formatted_rows:
+                    return formatted_rows
+
+                # Standardize the result
+                standardized_result = []
+                for item in result:
+                    if not isinstance(item, dict):
+                        continue
+                    row_dict = {}
+                    for header in headers:
+                        value = str(item.get(header, "")).strip()
+                        row_dict[header] = value
+                    standardized_result.append(row_dict)
+
+                if len(standardized_result) < len(formatted_rows):
+                    return formatted_rows
+
+                return standardized_result
+
+            except json.JSONDecodeError:
+                try:
+                    # Try to extract valid JSON using regex
+                    array_pattern = r'\[\s*{[^}]*}\s*(,\s*{[^}]*}\s*)*\]'
+                    matches = re.findall(array_pattern, content)
+                    if matches:
+                        content = matches[0]
+                        result = json.loads(content)
+                        if isinstance(result, list):
+                            return result
+                except:
+                    pass
+
+                # If all parsing attempts fail, return the pre-formatted data
+                return formatted_rows
+
+        except Exception as e:
+            # If any error occurs, return the pre-formatted data
+            return formatted_rows
+
     def _detect_header_row(self, df: pd.DataFrame, max_rows_to_check: int = 10) -> int:
         """
         Detect the header row by analyzing data patterns, without making assumptions about specific column names.

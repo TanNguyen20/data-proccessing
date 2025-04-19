@@ -449,230 +449,6 @@ class XAIProvider(BaseAIProvider):
         except Exception as e:
             raise Exception(f"Error processing Excel URL with xAI: {str(e)}")
             
-    async def process_table_from_pdf(self, pdf_content: str, **kwargs) -> List[Dict[str, Any]]:
-        """Process table data extracted from PDF using xAI
-
-        Args:
-            pdf_content (str): The extracted text content from PDF containing table data
-            **kwargs: Additional arguments like model, temperature, etc.
-
-        Returns:
-            List[Dict[str, Any]]: Array of JSON objects representing the structured table data
-        """
-        try:
-            # Create a more specific prompt that guides the AI to structure the table data
-            system_prompt = """You are a data extraction specialist. Your task is to:
-            1. Identify table structures in the provided PDF text content
-            2. Extract data into a structured format
-            3. Return ONLY a valid JSON array of objects where each object represents a row
-            4. Each object should have the same set of keys
-            5. Clean and standardize the data
-            6. Handle any merged cells or spanning columns appropriately
-            
-            IMPORTANT: Your response must be ONLY the JSON array, with no additional text or formatting.
-            Example format:
-            [
-                {"column1": "value1", "column2": "value2"},
-                {"column1": "value3", "column2": "value4"}
-            ]"""
-
-            user_prompt = f"""Extract and structure this table data from PDF into JSON format. 
-            Remember to return ONLY the JSON array with no additional text:
-
-            {pdf_content}"""
-
-            # Use the xAI model to process the table data with stricter parameters
-            model_name = kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL
-            response = self.client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=kwargs.get('temperature', 0.1),  # Lower temperature for more consistent formatting
-                max_tokens=kwargs.get('max_tokens', 2000),
-                response_format={ "type": "json_object" }  # Request JSON format specifically
-            )
-
-            try:
-                # Try to parse the response directly
-                content = response.choices[0].message.content.strip()
-                # Remove any markdown code block markers if present
-                content = re.sub(r'^```json\s*|\s*```$', '', content)
-                result = json.loads(content)
-
-                if not isinstance(result, list):
-                    # If we got a JSON object but not an array, try to extract an array
-                    if isinstance(result, dict) and any(isinstance(v, list) for v in result.values()):
-                        # Find the first list value in the dictionary
-                        for value in result.values():
-                            if isinstance(value, list):
-                                result = value
-                                break
-                    else:
-                        # Wrap single object in a list
-                        result = [result]
-
-                # Validate and standardize the data structure
-                if result:
-                    # Get keys from first object to ensure consistency
-                    expected_keys = set(result[0].keys())
-                    for item in result[1:]:
-                        if set(item.keys()) != expected_keys:
-                            # Ensure all objects have the same keys
-                            missing_keys = expected_keys - set(item.keys())
-                            for key in missing_keys:
-                                item[key] = None
-
-                return result
-
-            except json.JSONDecodeError as json_error:
-                # If direct parsing fails, try to extract JSON from the response
-                cleanup_prompt = f"""The previous response needs to be converted to valid JSON. 
-                Extract ONLY the table data and format it as a JSON array of objects.
-                Return ONLY the JSON array, no other text.
-
-                Previous response:
-                {response.choices[0].message.content}"""
-
-                cleanup_response = self.client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a JSON formatting specialist. Return ONLY valid JSON, no other text."},
-                        {"role": "user", "content": cleanup_prompt}
-                    ],
-                    temperature=0.1,
-                    response_format={ "type": "json_object" }
-                )
-
-                try:
-                    content = cleanup_response.choices[0].message.content.strip()
-                    # Remove any markdown code block markers if present
-                    content = re.sub(r'^```json\s*|\s*```$', '', content)
-                    result = json.loads(content)
-
-                    # Same validation as above
-                    if not isinstance(result, list):
-                        if isinstance(result, dict) and any(isinstance(v, list) for v in result.values()):
-                            for value in result.values():
-                                if isinstance(value, list):
-                                    result = value
-                                    break
-                        else:
-                            result = [result]
-
-                    return result
-                except json.JSONDecodeError:
-                    # If both attempts fail, try one last time with table detection
-                    return await self._fallback_table_extraction(pdf_content, model_name)
-
-        except Exception as e:
-            raise Exception(f"Error processing PDF table with xAI: {str(e)}")
-
-    async def _fallback_table_extraction(self, text_content: str, model_name: str) -> List[Dict[str, Any]]:
-        """Fallback method for table extraction when JSON parsing fails"""
-        try:
-            # First, try to detect table structure
-            detect_prompt = """Analyze this text and identify the table structure. Return ONLY:
-            1. The column names as a JSON array
-            2. The number of rows detected
-            Format your response exactly like this example:
-            {"columns": ["Name", "Age", "City"], "row_count": 3}"""
-
-            detect_response = self.client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "You are a table structure detector."},
-                    {"role": "user", "content": detect_prompt + "\n\n" + text_content}
-                ],
-                temperature=0.1,
-                response_format={ "type": "json_object" }
-            )
-
-            structure = json.loads(detect_response.choices[0].message.content)
-            columns = structure.get('columns', [])
-            
-            if not columns:
-                raise ValueError("No table structure detected")
-
-            # Now extract row data one by one
-            extract_prompt = f"""Extract the data for each row and format it as a JSON object using these columns: {columns}
-            Format each row exactly like this:
-            {{"column1": "value1", "column2": "value2"}}"""
-
-            extract_response = self.client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "You are a data extraction specialist."},
-                    {"role": "user", "content": extract_prompt + "\n\n" + text_content}
-                ],
-                temperature=0.1,
-                response_format={ "type": "json_object" }
-            )
-
-            # Process the extracted data
-            content = extract_response.choices[0].message.content.strip()
-            content = re.sub(r'^```json\s*|\s*```$', '', content)
-            rows = json.loads(content)
-            
-            if isinstance(rows, dict):
-                # Convert dict of rows to list if needed
-                rows = [rows]
-            
-            # Ensure all rows have all columns
-            for row in rows:
-                for col in columns:
-                    if col not in row:
-                        row[col] = None
-
-            return rows
-
-        except Exception as e:
-            # If all attempts fail, return an empty result rather than throwing an error
-            return []
-
-    async def _clean_table_data(self, table: List[List[Any]]) -> List[List[str]]:
-        """Clean and validate table data before processing
-        
-        Args:
-            table: Raw table data from pdfplumber
-            
-        Returns:
-            Cleaned table data with properly formatted strings
-        """
-        cleaned_table = []
-        for row in table:
-            # Skip rows that are completely empty or None
-            if not any(cell for cell in row if cell is not None):
-                continue
-                
-            cleaned_row = []
-            for cell in row:
-                # Convert cell to string and clean it
-                if cell is None:
-                    cleaned_cell = ""
-                else:
-                    # Remove any problematic characters that might cause JSON issues
-                    cleaned_cell = str(cell).strip()
-                    # Replace any characters that might cause JSON parsing issues
-                    cleaned_cell = (cleaned_cell
-                        .replace('"', "'")  # Replace double quotes with single quotes
-                        .replace('\n', ' ')  # Replace newlines with spaces
-                        .replace('\r', '')   # Remove carriage returns
-                        .replace('\t', ' ')  # Replace tabs with spaces
-                        .replace('\\', '/')  # Replace backslashes with forward slashes
-                    )
-                    # Normalize whitespace
-                    cleaned_cell = ' '.join(cleaned_cell.split())
-                
-                cleaned_row.append(cleaned_cell)
-            
-            # Only add rows that have at least one non-empty cell
-            if any(cell for cell in cleaned_row):
-                cleaned_table.append(cleaned_row)
-        
-        return cleaned_table
-
     async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
         """Process PDF file using pdfplumber for table extraction and AI for formatting"""
         try:
@@ -744,22 +520,6 @@ class XAIProvider(BaseAIProvider):
                         print(f"Error processing table on page {page_num}: {str(table_error)}")
                         continue
 
-                # If no tables were successfully extracted, try to find table-like structures in the text
-                if not all_table_data and full_text:
-                    # Try to process the full text as a potential table
-                    table_data = await self.process_table_from_pdf(
-                        full_text,
-                        model=kwargs.get('model'),
-                        temperature=kwargs.get('temperature', 0.2),
-                        max_tokens=kwargs.get('max_tokens', 4000)
-                    )
-                    if table_data:
-                        # Add page information
-                        for row in table_data:
-                            row['_page_number'] = 1
-                            row['_table_number'] = 1
-                        all_table_data.extend(table_data)
-
             # Get overall analysis
             analysis_response = self.client.chat.completions.create(
                 model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
@@ -789,6 +549,104 @@ class XAIProvider(BaseAIProvider):
 
         except Exception as e:
             raise Exception(f"Error processing PDF with xAI: {str(e)}")
+
+    async def _clean_table_data(self, table: List[List[Any]]) -> List[List[str]]:
+        """Clean and validate table data before processing
+        
+        Args:
+            table: Raw table data from pdfplumber
+            
+        Returns:
+            Cleaned table data with properly formatted strings
+        """
+        cleaned_table = []
+        for row in table:
+            # Skip rows that are completely empty or None
+            if not any(cell for cell in row if cell is not None):
+                continue
+                
+            cleaned_row = []
+            for cell in row:
+                # Convert cell to string and clean it
+                if cell is None:
+                    cleaned_cell = ""
+                else:
+                    # Remove any problematic characters that might cause JSON issues
+                    cleaned_cell = str(cell).strip()
+                    # Replace any characters that might cause JSON parsing issues
+                    cleaned_cell = (cleaned_cell
+                        .replace('"', "'")  # Replace double quotes with single quotes
+                        .replace('\n', ' ')  # Replace newlines with spaces
+                        .replace('\r', '')   # Remove carriage returns
+                        .replace('\t', ' ')  # Replace tabs with spaces
+                        .replace('\\', '/')  # Replace backslashes with forward slashes
+                    )
+                    # Normalize whitespace
+                    cleaned_cell = ' '.join(cleaned_cell.split())
+                
+                cleaned_row.append(cleaned_cell)
+            
+            # Only add rows that have at least one non-empty cell
+            if any(cell for cell in cleaned_row):
+                cleaned_table.append(cleaned_row)
+        
+        return cleaned_table
+
+    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[List[str], bool]:
+        """Detect and validate table headers, using previous headers as fallback
+        
+        Args:
+            table: The table data to analyze
+            previous_headers: Headers from a previous table (optional)
+            
+        Returns:
+            Tuple of (headers, is_header_row) where headers is the list of column names
+            and is_header_row indicates if the first row was detected as a header
+        """
+        if not table or not table[0]:
+            return previous_headers or [], False
+
+        first_row = table[0]
+        
+        # Check if first row looks like a header
+        non_empty_cells = [cell for cell in first_row if cell.strip()]
+        if non_empty_cells:
+            # Calculate metrics for header detection
+            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(non_empty_cells)
+            unique_ratio = len(set(non_empty_cells)) / len(non_empty_cells)
+            avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
+            
+            is_header = (non_numeric_ratio > 0.7 and 
+                        unique_ratio > 0.8 and 
+                        3 <= avg_length <= 30)
+            
+            if is_header:
+                # Clean and format headers
+                headers = [
+                    str(cell).strip() or f"Column_{i+1}"
+                    for i, cell in enumerate(first_row)
+                ]
+                
+                # Make headers unique
+                seen_headers = set()
+                unique_headers = []
+                for header in headers:
+                    base_header = header
+                    counter = 1
+                    while header in seen_headers:
+                        header = f"{base_header}_{counter}"
+                        counter += 1
+                    seen_headers.add(header)
+                    unique_headers.append(header)
+                
+                return unique_headers, True
+        
+        # If no valid header detected, use previous headers or generate generic ones
+        if previous_headers and len(previous_headers) >= len(first_row):
+            return previous_headers[:len(first_row)], False
+        else:
+            # Generate generic headers
+            return [f"Column_{i+1}" for i in range(len(first_row))], False
 
     async def _format_table_data(self, headers: List[str], rows: List[List[str]], **kwargs) -> List[Dict[str, str]]:
         """Format extracted table data using AI"""
@@ -1083,59 +941,3 @@ class XAIProvider(BaseAIProvider):
             data.append(row_dict)
             
         return data
-
-    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[List[str], bool]:
-        """Detect and validate table headers, using previous headers as fallback
-        
-        Args:
-            table: The table data to analyze
-            previous_headers: Headers from a previous table (optional)
-            
-        Returns:
-            Tuple of (headers, is_header_row) where headers is the list of column names
-            and is_header_row indicates if the first row was detected as a header
-        """
-        if not table or not table[0]:
-            return previous_headers or [], False
-
-        first_row = table[0]
-        
-        # Check if first row looks like a header
-        non_empty_cells = [cell for cell in first_row if cell.strip()]
-        if non_empty_cells:
-            # Calculate metrics for header detection
-            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(non_empty_cells)
-            unique_ratio = len(set(non_empty_cells)) / len(non_empty_cells)
-            avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
-            
-            is_header = (non_numeric_ratio > 0.7 and 
-                        unique_ratio > 0.8 and 
-                        3 <= avg_length <= 30)
-            
-            if is_header:
-                # Clean and format headers
-                headers = [
-                    str(cell).strip() or f"Column_{i+1}"
-                    for i, cell in enumerate(first_row)
-                ]
-                
-                # Make headers unique
-                seen_headers = set()
-                unique_headers = []
-                for header in headers:
-                    base_header = header
-                    counter = 1
-                    while header in seen_headers:
-                        header = f"{base_header}_{counter}"
-                        counter += 1
-                    seen_headers.add(header)
-                    unique_headers.append(header)
-                
-                return unique_headers, True
-        
-        # If no valid header detected, use previous headers or generate generic ones
-        if previous_headers and len(previous_headers) >= len(first_row):
-            return previous_headers[:len(first_row)], False
-        else:
-            # Generate generic headers
-            return [f"Column_{i+1}" for i in range(len(first_row))], False
