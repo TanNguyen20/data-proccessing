@@ -69,6 +69,10 @@ class ExcelUrlRequest(BaseAIRequest):
     excel_url: HttpUrl
     prompt: Optional[str] = None
 
+class PDFRequest(BaseAIRequest):
+    pdf_content: str
+    prompt: Optional[str] = None
+
 # Error handling decorator
 def handle_ai_errors(func):
     @wraps(func)
@@ -289,6 +293,79 @@ async def process_excel_url(request: ExcelUrlRequest):
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-pdf-table")
+@handle_ai_errors
+async def process_pdf_table(request: PDFRequest, processor: AIProcessor = Depends(get_processor)):
+    """
+    Process table data from PDF content.
+    
+    Args:
+        request: The request containing:
+            - pdf_content: The text content extracted from the PDF containing table data
+            - provider: The AI provider to use (xai, openai, gemini)
+            - model: The model to use
+            - prompt: Optional prompt to guide the analysis
+            - temperature: Temperature for the AI model (0.0 to 1.0)
+            - max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        List of JSON objects representing the structured table data
+    """
+    try:
+        result = await processor.provider.process_table_from_pdf(
+            request.pdf_content,
+            prompt=request.prompt,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-pdf")
+@handle_ai_errors
+async def process_pdf(
+    file: UploadFile = File(...),
+    provider: str = Query("xai", description="AI provider to use"),
+    model: Optional[str] = None,
+    prompt: Optional[str] = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000
+):
+    """
+    Process PDF file with table data using AI.
+    
+    Args:
+        file: The PDF file to process
+        provider: The AI provider to use (xai, openai, gemini)
+        model: Optional specific model to use
+        prompt: Optional prompt to guide the analysis
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        Dict containing:
+        - table_data: Structured table data from the PDF
+        - analysis: Overall analysis of the document
+        - page_count: Number of pages in the PDF
+    """
+    try:
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="File must be a PDF")
+            
+        processor = AIProcessor(provider=provider)
+        result = await processor.provider.process_pdf(
+            file,
+            model=model,
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens
         )
         return result
     except Exception as e:

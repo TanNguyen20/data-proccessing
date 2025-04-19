@@ -57,6 +57,28 @@ class AIProcessor:
         except Exception as e:
             raise Exception(f"Error processing text: {str(e)}")
 
+    async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process PDF file using AI
+        
+        Args:
+            pdf_file: The uploaded PDF file
+            **kwargs: Additional arguments like model, temperature, prompt etc.
+            
+        Returns:
+            Dict containing the processed PDF data and analysis
+        """
+        try:
+            # Check if provider is specified in kwargs and is different from current provider
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+                # Initialize a new provider with the specified provider name
+                self.provider = self._initialize_provider(kwargs['provider'])
+                # Remove provider from kwargs to avoid passing it to the provider method
+                del kwargs['provider']
+
+            return await self.provider.process_pdf(pdf_file, **kwargs)
+        except Exception as e:
+            raise Exception(f"Error processing PDF file: {str(e)}")
+
     async def process_excel_url(self, excel_url: str, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using AI"""
         try:

@@ -2,8 +2,9 @@ import base64
 import json
 import pandas as pd
 import requests
+from fastapi import UploadFile
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 import tempfile
 import os
 import numpy as np
@@ -448,6 +449,469 @@ class XAIProvider(BaseAIProvider):
         except Exception as e:
             raise Exception(f"Error processing Excel URL with xAI: {str(e)}")
             
+    async def process_table_from_pdf(self, pdf_content: str, **kwargs) -> List[Dict[str, Any]]:
+        """Process table data extracted from PDF using xAI
+
+        Args:
+            pdf_content (str): The extracted text content from PDF containing table data
+            **kwargs: Additional arguments like model, temperature, etc.
+
+        Returns:
+            List[Dict[str, Any]]: Array of JSON objects representing the structured table data
+        """
+        try:
+            # Create a more specific prompt that guides the AI to structure the table data
+            system_prompt = """You are a data extraction specialist. Your task is to:
+            1. Identify table structures in the provided PDF text content
+            2. Extract data into a structured format
+            3. Return ONLY a valid JSON array of objects where each object represents a row
+            4. Each object should have the same set of keys
+            5. Clean and standardize the data
+            6. Handle any merged cells or spanning columns appropriately
+            
+            IMPORTANT: Your response must be ONLY the JSON array, with no additional text or formatting.
+            Example format:
+            [
+                {"column1": "value1", "column2": "value2"},
+                {"column1": "value3", "column2": "value4"}
+            ]"""
+
+            user_prompt = f"""Extract and structure this table data from PDF into JSON format. 
+            Remember to return ONLY the JSON array with no additional text:
+
+            {pdf_content}"""
+
+            # Use the xAI model to process the table data with stricter parameters
+            model_name = kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL
+            response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=kwargs.get('temperature', 0.1),  # Lower temperature for more consistent formatting
+                max_tokens=kwargs.get('max_tokens', 2000),
+                response_format={ "type": "json_object" }  # Request JSON format specifically
+            )
+
+            try:
+                # Try to parse the response directly
+                content = response.choices[0].message.content.strip()
+                # Remove any markdown code block markers if present
+                content = re.sub(r'^```json\s*|\s*```$', '', content)
+                result = json.loads(content)
+
+                if not isinstance(result, list):
+                    # If we got a JSON object but not an array, try to extract an array
+                    if isinstance(result, dict) and any(isinstance(v, list) for v in result.values()):
+                        # Find the first list value in the dictionary
+                        for value in result.values():
+                            if isinstance(value, list):
+                                result = value
+                                break
+                    else:
+                        # Wrap single object in a list
+                        result = [result]
+
+                # Validate and standardize the data structure
+                if result:
+                    # Get keys from first object to ensure consistency
+                    expected_keys = set(result[0].keys())
+                    for item in result[1:]:
+                        if set(item.keys()) != expected_keys:
+                            # Ensure all objects have the same keys
+                            missing_keys = expected_keys - set(item.keys())
+                            for key in missing_keys:
+                                item[key] = None
+
+                return result
+
+            except json.JSONDecodeError as json_error:
+                # If direct parsing fails, try to extract JSON from the response
+                cleanup_prompt = f"""The previous response needs to be converted to valid JSON. 
+                Extract ONLY the table data and format it as a JSON array of objects.
+                Return ONLY the JSON array, no other text.
+
+                Previous response:
+                {response.choices[0].message.content}"""
+
+                cleanup_response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a JSON formatting specialist. Return ONLY valid JSON, no other text."},
+                        {"role": "user", "content": cleanup_prompt}
+                    ],
+                    temperature=0.1,
+                    response_format={ "type": "json_object" }
+                )
+
+                try:
+                    content = cleanup_response.choices[0].message.content.strip()
+                    # Remove any markdown code block markers if present
+                    content = re.sub(r'^```json\s*|\s*```$', '', content)
+                    result = json.loads(content)
+
+                    # Same validation as above
+                    if not isinstance(result, list):
+                        if isinstance(result, dict) and any(isinstance(v, list) for v in result.values()):
+                            for value in result.values():
+                                if isinstance(value, list):
+                                    result = value
+                                    break
+                        else:
+                            result = [result]
+
+                    return result
+                except json.JSONDecodeError:
+                    # If both attempts fail, try one last time with table detection
+                    return await self._fallback_table_extraction(pdf_content, model_name)
+
+        except Exception as e:
+            raise Exception(f"Error processing PDF table with xAI: {str(e)}")
+
+    async def _fallback_table_extraction(self, text_content: str, model_name: str) -> List[Dict[str, Any]]:
+        """Fallback method for table extraction when JSON parsing fails"""
+        try:
+            # First, try to detect table structure
+            detect_prompt = """Analyze this text and identify the table structure. Return ONLY:
+            1. The column names as a JSON array
+            2. The number of rows detected
+            Format your response exactly like this example:
+            {"columns": ["Name", "Age", "City"], "row_count": 3}"""
+
+            detect_response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a table structure detector."},
+                    {"role": "user", "content": detect_prompt + "\n\n" + text_content}
+                ],
+                temperature=0.1,
+                response_format={ "type": "json_object" }
+            )
+
+            structure = json.loads(detect_response.choices[0].message.content)
+            columns = structure.get('columns', [])
+            
+            if not columns:
+                raise ValueError("No table structure detected")
+
+            # Now extract row data one by one
+            extract_prompt = f"""Extract the data for each row and format it as a JSON object using these columns: {columns}
+            Format each row exactly like this:
+            {{"column1": "value1", "column2": "value2"}}"""
+
+            extract_response = self.client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a data extraction specialist."},
+                    {"role": "user", "content": extract_prompt + "\n\n" + text_content}
+                ],
+                temperature=0.1,
+                response_format={ "type": "json_object" }
+            )
+
+            # Process the extracted data
+            content = extract_response.choices[0].message.content.strip()
+            content = re.sub(r'^```json\s*|\s*```$', '', content)
+            rows = json.loads(content)
+            
+            if isinstance(rows, dict):
+                # Convert dict of rows to list if needed
+                rows = [rows]
+            
+            # Ensure all rows have all columns
+            for row in rows:
+                for col in columns:
+                    if col not in row:
+                        row[col] = None
+
+            return rows
+
+        except Exception as e:
+            # If all attempts fail, return an empty result rather than throwing an error
+            return []
+
+    async def _clean_table_data(self, table: List[List[Any]]) -> List[List[str]]:
+        """Clean and validate table data before processing
+        
+        Args:
+            table: Raw table data from pdfplumber
+            
+        Returns:
+            Cleaned table data with properly formatted strings
+        """
+        cleaned_table = []
+        for row in table:
+            # Skip rows that are completely empty or None
+            if not any(cell for cell in row if cell is not None):
+                continue
+                
+            cleaned_row = []
+            for cell in row:
+                # Convert cell to string and clean it
+                if cell is None:
+                    cleaned_cell = ""
+                else:
+                    # Remove any problematic characters that might cause JSON issues
+                    cleaned_cell = str(cell).strip()
+                    # Replace any characters that might cause JSON parsing issues
+                    cleaned_cell = (cleaned_cell
+                        .replace('"', "'")  # Replace double quotes with single quotes
+                        .replace('\n', ' ')  # Replace newlines with spaces
+                        .replace('\r', '')   # Remove carriage returns
+                        .replace('\t', ' ')  # Replace tabs with spaces
+                        .replace('\\', '/')  # Replace backslashes with forward slashes
+                    )
+                    # Normalize whitespace
+                    cleaned_cell = ' '.join(cleaned_cell.split())
+                
+                cleaned_row.append(cleaned_cell)
+            
+            # Only add rows that have at least one non-empty cell
+            if any(cell for cell in cleaned_row):
+                cleaned_table.append(cleaned_row)
+        
+        return cleaned_table
+
+    async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process PDF file using pdfplumber for table extraction and AI for formatting"""
+        try:
+            import pdfplumber
+            import io
+
+            # Read the PDF file content
+            pdf_content = await pdf_file.read()
+            pdf_file_obj = io.BytesIO(pdf_content)
+            
+            all_table_data = []
+            full_text = ""
+            page_headers = {}  # Store headers by page number
+            first_table_headers = None  # Store headers from first table found
+            
+            # Open PDF with pdfplumber
+            with pdfplumber.open(pdf_file_obj) as pdf:
+                # Process each page
+                for page_num, page in enumerate(pdf.pages, 1):
+                    # Extract page text
+                    page_text = page.extract_text() or ""
+                    full_text += page_text + "\n"
+                    
+                    try:
+                        # Extract tables from the page
+                        tables = page.extract_tables()
+                        
+                        if tables:
+                            for table_num, table in enumerate(tables, 1):
+                                # Clean and validate table data
+                                cleaned_table = await self._clean_table_data(table)
+                                
+                                if cleaned_table:
+                                    # Get appropriate headers for this table
+                                    headers, is_header_row = await self._detect_and_validate_headers(
+                                        cleaned_table,
+                                        first_table_headers  # Pass headers from first table as fallback
+                                    )
+                                    
+                                    # Store headers from first table found
+                                    if first_table_headers is None and headers:
+                                        first_table_headers = headers.copy()
+                                    
+                                    # Store headers for this page/table combination
+                                    page_headers[f"page_{page_num}_table_{table_num}"] = headers
+                                    
+                                    # Skip header row if it was detected as a header
+                                    table_data = cleaned_table[1:] if is_header_row else cleaned_table
+                                    
+                                    if table_data:  # Process only if we have data rows
+                                        # Process table data with AI
+                                        formatted_data = await self._format_table_data(
+                                            headers,
+                                            table_data,
+                                            model=kwargs.get('model'),
+                                            temperature=kwargs.get('temperature', 0.2),
+                                            max_tokens=kwargs.get('max_tokens', 2000)
+                                        )
+                                        
+                                        if formatted_data:
+                                            # Add page and table information to each row
+                                            for row in formatted_data:
+                                                row['_page_number'] = page_num
+                                                row['_table_number'] = table_num
+                                            all_table_data.extend(formatted_data)
+                    
+                    except Exception as table_error:
+                        # Log the error but continue processing other tables
+                        print(f"Error processing table on page {page_num}: {str(table_error)}")
+                        continue
+
+                # If no tables were successfully extracted, try to find table-like structures in the text
+                if not all_table_data and full_text:
+                    # Try to process the full text as a potential table
+                    table_data = await self.process_table_from_pdf(
+                        full_text,
+                        model=kwargs.get('model'),
+                        temperature=kwargs.get('temperature', 0.2),
+                        max_tokens=kwargs.get('max_tokens', 4000)
+                    )
+                    if table_data:
+                        # Add page information
+                        for row in table_data:
+                            row['_page_number'] = 1
+                            row['_table_number'] = 1
+                        all_table_data.extend(table_data)
+
+            # Get overall analysis
+            analysis_response = self.client.chat.completions.create(
+                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a PDF document analyzer. Analyze this document and provide:
+                        1. A summary of the key information
+                        2. Any patterns or trends identified
+                        3. Important data points
+                        4. Document structure analysis
+                        Make the analysis clear and concise."""
+                    },
+                    {"role": "user", "content": full_text}
+                ],
+                temperature=kwargs.get('temperature', 0.7),
+                max_tokens=kwargs.get('max_tokens', 1000)
+            )
+
+            return {
+                "table_data": all_table_data,
+                "analysis": analysis_response.choices[0].message.content,
+                "page_count": len(pdf.pages),
+                "row_count": len(all_table_data),
+                "headers_by_page": page_headers  # Include header information for reference
+            }
+
+        except Exception as e:
+            raise Exception(f"Error processing PDF with xAI: {str(e)}")
+
+    async def _format_table_data(self, headers: List[str], rows: List[List[str]], **kwargs) -> List[Dict[str, str]]:
+        """Format extracted table data using AI"""
+        try:
+            # Create a more structured format for the data to minimize JSON parsing issues
+            system_prompt = """You are a data formatting specialist. Your task is to:
+            1. Format the provided table data as a JSON array
+            2. Each object in the array should have the exact column headers as keys
+            3. Values should be properly escaped strings
+            4. Ensure all quotes and special characters are properly escaped
+            5. Return ONLY valid JSON data with no additional text or formatting
+            
+            IMPORTANT: Your response must be ONLY the JSON array, properly formatted and escaped."""
+
+            # Convert the rows to a more structured format
+            formatted_rows = []
+            for row in rows:
+                row_dict = {}
+                for i, value in enumerate(row):
+                    if i < len(headers):
+                        header = headers[i]
+                        # Clean and escape the value
+                        cleaned_value = str(value).strip().replace('"', '\\"').replace('\n', ' ').replace('\r', '')
+                        row_dict[header] = cleaned_value
+                formatted_rows.append(row_dict)
+            
+            # Create a simpler prompt with pre-formatted data
+            user_prompt = f"""Format this data as a valid JSON array. Use these exact column headers: {headers}
+            
+            Pre-formatted data (already in dictionary format):
+            {json.dumps(formatted_rows, ensure_ascii=False, indent=2)}
+            
+            Return ONLY the JSON array with proper formatting and escaping."""
+
+            # Use the AI model to format the data
+            response = self.client.chat.completions.create(
+                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,  # Very low temperature for consistent formatting
+                max_tokens=kwargs.get('max_tokens', 4000),
+                response_format={ "type": "json_object" }
+            )
+
+            try:
+                # Get and clean the response content
+                content = response.choices[0].message.content.strip()
+                
+                # Remove any markdown code block markers
+                content = re.sub(r'^```json\s*|\s*```$', '', content)
+                
+                # Try to fix common JSON formatting issues
+                content = content.replace('\n', ' ').replace('\r', '')  # Remove newlines
+                content = re.sub(r',\s*]', ']', content)  # Remove trailing commas
+                content = re.sub(r'\s+', ' ', content)  # Normalize whitespace
+                
+                # If content doesn't start with '[', try to find the array
+                if not content.startswith('['):
+                    array_start = content.find('[')
+                    array_end = content.rfind(']')
+                    if array_start != -1 and array_end != -1:
+                        content = content[array_start:array_end + 1]
+
+                # Parse the JSON
+                result = json.loads(content)
+
+                # Ensure we have a list
+                if not isinstance(result, list):
+                    if isinstance(result, dict):
+                        # If we got a dict with a data/rows field, try to extract it
+                        for key in ['data', 'rows', 'table', 'results']:
+                            if key in result and isinstance(result[key], list):
+                                result = result[key]
+                                break
+                        if not isinstance(result, list):
+                            result = [result]  # If still not a list, wrap it
+
+                # If parsing succeeded but we got an empty result, return the pre-formatted data
+                if not result and formatted_rows:
+                    return formatted_rows
+
+                # Validate and standardize the structure
+                standardized_result = []
+                for item in result:
+                    if not isinstance(item, dict):
+                        continue
+                    # Create a new dict with all headers
+                    row_dict = {}
+                    for header in headers:
+                        # Get the value, using an empty string as default
+                        value = str(item.get(header, "")).strip()
+                        row_dict[header] = value
+                    standardized_result.append(row_dict)
+
+                # If we lost data in standardization, return the pre-formatted data
+                if len(standardized_result) < len(formatted_rows):
+                    return formatted_rows
+
+                return standardized_result
+
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract valid JSON using regex
+                try:
+                    # Look for array pattern
+                    array_pattern = r'\[\s*{[^}]*}\s*(,\s*{[^}]*}\s*)*\]'
+                    matches = re.findall(array_pattern, content)
+                    if matches:
+                        content = matches[0]
+                        result = json.loads(content)
+                        if isinstance(result, list):
+                            return result
+                except:
+                    pass
+
+                # If all parsing attempts fail, return the pre-formatted data
+                return formatted_rows
+
+        except Exception as e:
+            # Instead of raising an exception, return the pre-formatted data
+            return formatted_rows
+
     def _detect_header_row(self, df: pd.DataFrame, max_rows_to_check: int = 10) -> int:
         """
         Detect the header row by analyzing data patterns, without making assumptions about specific column names.
@@ -464,7 +928,7 @@ class XAIProvider(BaseAIProvider):
 
         # Check the first few rows
         for i in range(min(max_rows_to_check, len(df))):
-            row = df.iloc[i]
+            row = df.iloc(i)
             
             # Skip completely empty rows
             if row.isna().all():
@@ -486,7 +950,7 @@ class XAIProvider(BaseAIProvider):
         
         # If no clear header is found, use the first non-empty row
         for i in range(min(max_rows_to_check, len(df))):
-            if not df.iloc[i].isna().all():
+            if not df.iloc(i).isna().all():
                 return i
         
         return 0
@@ -591,6 +1055,7 @@ class XAIProvider(BaseAIProvider):
             or (str(v).isdigit() and len(str(v)) in (9, 10))
             for v in values
         ) / len(values)
+        
         if phone_pattern > 0.8:
             return 'contact'
 
@@ -618,3 +1083,59 @@ class XAIProvider(BaseAIProvider):
             data.append(row_dict)
             
         return data
+
+    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[List[str], bool]:
+        """Detect and validate table headers, using previous headers as fallback
+        
+        Args:
+            table: The table data to analyze
+            previous_headers: Headers from a previous table (optional)
+            
+        Returns:
+            Tuple of (headers, is_header_row) where headers is the list of column names
+            and is_header_row indicates if the first row was detected as a header
+        """
+        if not table or not table[0]:
+            return previous_headers or [], False
+
+        first_row = table[0]
+        
+        # Check if first row looks like a header
+        non_empty_cells = [cell for cell in first_row if cell.strip()]
+        if non_empty_cells:
+            # Calculate metrics for header detection
+            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(non_empty_cells)
+            unique_ratio = len(set(non_empty_cells)) / len(non_empty_cells)
+            avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
+            
+            is_header = (non_numeric_ratio > 0.7 and 
+                        unique_ratio > 0.8 and 
+                        3 <= avg_length <= 30)
+            
+            if is_header:
+                # Clean and format headers
+                headers = [
+                    str(cell).strip() or f"Column_{i+1}"
+                    for i, cell in enumerate(first_row)
+                ]
+                
+                # Make headers unique
+                seen_headers = set()
+                unique_headers = []
+                for header in headers:
+                    base_header = header
+                    counter = 1
+                    while header in seen_headers:
+                        header = f"{base_header}_{counter}"
+                        counter += 1
+                    seen_headers.add(header)
+                    unique_headers.append(header)
+                
+                return unique_headers, True
+        
+        # If no valid header detected, use previous headers or generate generic ones
+        if previous_headers and len(previous_headers) >= len(first_row):
+            return previous_headers[:len(first_row)], False
+        else:
+            # Generate generic headers
+            return [f"Column_{i+1}" for i in range(len(first_row))], False
