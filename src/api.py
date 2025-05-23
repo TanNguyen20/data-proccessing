@@ -10,7 +10,6 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends, Re
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
@@ -40,12 +39,6 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
-
-# Mount static files
-app.mount("/static", StaticFiles(directory="src/static"), name="static")
-
-# Setup templates
-templates = Jinja2Templates(directory="src/templates")
 
 # Base request model with common fields
 class BaseAIRequest(BaseModel):
@@ -118,9 +111,6 @@ def get_processor(provider: str = Query("xai", description="AI provider to use")
         raise HTTPException(status_code=400, detail=str(e))
 
 # Routes
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/providers")
 async def get_providers():

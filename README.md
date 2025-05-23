@@ -37,23 +37,18 @@ Google Gemini, and xAI).
 
 ```
 ├── src/
-│   ├── providers/         # AI provider implementations
+│   ├── providers/        # AI provider implementations
 │   │   ├── base_provider.py
 │   │   ├── openai_provider.py
 │   │   ├── gemini_provider.py
 │   │   ├── xai_provider.py
-│   │   └── README_XAI.md
-│   ├── extractors/        # Data extraction modules
+│   ├── extractors/       # Data extraction modules
 │   │   └── excel_extractor.py
 │   ├── utils/            # Utility functions
 │   ├── config.py         # Configuration management
 │   └── main.py           # Main entry point
-├── examples/             # Example scripts
-│   ├── xai_example.py    # xAI provider examples
-│   └── process_data.py   # Data processing examples
-├── data/                 # Sample data files
 ├── requirements.txt      # Project dependencies
-└── .env                 # Environment variables
+└── .env.template         # Templete for environment variables 
 ```
 
 ## Usage
@@ -104,13 +99,6 @@ for line in provider.stream_chat(messages):
         # Process streaming response
         print(line.decode('utf-8'))
 ```
-
-## Examples
-
-Check the `examples` directory for more detailed examples:
-
-- `xai_example.py`: Demonstrates how to use the xAI provider
-- `process_data.py`: Shows how to process data from various sources
 
 ## License
 
