@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
-from .utils.page_extractor import extract_table_from_url
+from .utils.page_extractor import extract_table_as_json
 
 # Configure logging
 logging.basicConfig(
@@ -352,7 +352,7 @@ async def process_pdf(
 @app.post("/extract-table-from-page")
 async def extract_table(request: URLRequest):
     try:
-        table_data = await extract_table_from_url(request.url)
+        table_data = await extract_table_as_json(request.url)
         return {"data": table_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
