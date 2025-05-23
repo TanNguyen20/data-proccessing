@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict
+
 from fastapi import UploadFile
 
 
@@ -38,17 +39,17 @@ class BaseAIProvider(ABC):
     def get_available_models(self) -> list:
         """Get list of available models for the provider"""
         pass
-        
+
     @abstractmethod
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using the AI provider"""
         pass
-        
+
     @abstractmethod
     async def process_excel_url(self, excel_url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using the AI provider"""
         pass
-        
+
     @abstractmethod
     async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
         """Process PDF file using the AI provider

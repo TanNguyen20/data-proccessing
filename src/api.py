@@ -1,18 +1,18 @@
+import logging
 import os
 import tempfile
-import logging
 import traceback
-from typing import List, Dict, Any, Optional
 from functools import wraps
+from typing import List, Dict, Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
+from .utils.page_extractor import extract_table_from_url
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+
 # Base request model with common fields
 class BaseAIRequest(BaseModel):
     provider: str = "xai"
@@ -47,20 +48,29 @@ class BaseAIRequest(BaseModel):
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = 1000
 
+
 # Pydantic models for request/response
 class TextRequest(BaseAIRequest):
     text: str
 
+
 class TableDataRequest(BaseAIRequest):
     table_data: Dict[str, Any]
+
 
 class ChatRequest(BaseAIRequest):
     messages: List[Dict[str, str]]
     stream: bool = False
 
+
 class ExcelUrlRequest(BaseAIRequest):
     excel_url: HttpUrl
     prompt: Optional[str] = None
+
+
+class URLRequest(BaseModel):
+    url: str
+
 
 # Error handling decorator
 def handle_ai_errors(func):
@@ -71,7 +81,7 @@ def handle_ai_errors(func):
         except Exception as e:
             # Get the full traceback
             error_traceback = traceback.format_exc()
-            
+
             # Log detailed error information
             logger.error(
                 f"Error in {func.__name__}:\n"
@@ -80,7 +90,7 @@ def handle_ai_errors(func):
                 f"Error: {str(e)}\n"
                 f"Traceback:\n{error_traceback}"
             )
-            
+
             # For HTTP exceptions, preserve the status code
             if isinstance(e, HTTPException):
                 raise HTTPException(
@@ -91,7 +101,7 @@ def handle_ai_errors(func):
                         "traceback": error_traceback
                     }
                 )
-            
+
             # For other exceptions, return 500 with detailed error
             raise HTTPException(
                 status_code=500,
@@ -101,7 +111,9 @@ def handle_ai_errors(func):
                     "traceback": error_traceback
                 }
             )
+
     return wrapper
+
 
 # Dependency to get AI processor
 def get_processor(provider: str = Query("xai", description="AI provider to use")):
@@ -109,6 +121,7 @@ def get_processor(provider: str = Query("xai", description="AI provider to use")
         return AIProcessor(provider=provider)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # Routes
 
@@ -118,6 +131,7 @@ async def get_providers():
         "providers": ["openai", "gemini", "xai"],
         "default": "xai"
     }
+
 
 @app.post("/process/text")
 @handle_ai_errors
@@ -130,6 +144,7 @@ async def process_text(request: TextRequest, processor: AIProcessor = Depends(ge
     )
     return {"result": result}
 
+
 @app.post("/process/table")
 @handle_ai_errors
 async def process_table(request: TableDataRequest, processor: AIProcessor = Depends(get_processor)):
@@ -140,6 +155,7 @@ async def process_table(request: TableDataRequest, processor: AIProcessor = Depe
         max_tokens=request.max_tokens
     )
     return {"result": result}
+
 
 @app.post("/process/image")
 @handle_ai_errors
@@ -167,6 +183,7 @@ async def process_image(
     finally:
         os.unlink(temp_file_path)
 
+
 @app.post("/chat")
 @handle_ai_errors
 async def chat(request: ChatRequest, processor: AIProcessor = Depends(get_processor)):
@@ -191,6 +208,7 @@ async def chat(request: ChatRequest, processor: AIProcessor = Depends(get_proces
         )
         return {"result": result}
 
+
 @app.get("/embedding")
 @handle_ai_errors
 async def get_embedding(
@@ -201,14 +219,15 @@ async def get_embedding(
     embedding = processor.get_embedding(text)
     return {"embedding": embedding}
 
+
 @app.post("/process-excel-file")
 @handle_ai_errors
 async def process_excel_file(
-    excel_file: UploadFile = File(...),
-    provider: Optional[str] = None,
-    prompt: Optional[str] = None,
-    temperature: Optional[float] = 0.7,
-    max_tokens: Optional[int] = 1000
+        excel_file: UploadFile = File(...),
+        provider: Optional[str] = None,
+        prompt: Optional[str] = None,
+        temperature: Optional[float] = 0.7,
+        max_tokens: Optional[int] = 1000
 ):
     """
     Process an Excel file uploaded by the user.
@@ -230,7 +249,7 @@ async def process_excel_file(
             content = await excel_file.read()
             temp_file.write(content)
             temp_file_path = temp_file.name
-        
+
         # Prepare kwargs for the processor
         kwargs = {}
         if provider:
@@ -241,17 +260,18 @@ async def process_excel_file(
             kwargs["temperature"] = temperature
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
-        
+
         # Process the Excel file
         processor = AIProcessor(provider=provider if provider else "xai")
         result = await processor.process_excel(temp_file_path, **kwargs)
-        
+
         # Clean up the temporary file
         os.unlink(temp_file_path)
-        
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/process-excel-url/")
 @handle_ai_errors
@@ -284,15 +304,16 @@ async def process_excel_url(request: ExcelUrlRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/process-pdf")
 @handle_ai_errors
 async def process_pdf(
-    file: UploadFile = File(...),
-    provider: str = Query("xai", description="AI provider to use"),
-    model: Optional[str] = None,
-    prompt: Optional[str] = None,
-    temperature: float = 0.7,
-    max_tokens: int = 2000
+        file: UploadFile = File(...),
+        provider: str = Query("xai", description="AI provider to use"),
+        model: Optional[str] = None,
+        prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000
 ):
     """
     Process PDF file with table data using AI.
@@ -314,7 +335,7 @@ async def process_pdf(
     try:
         if not file.filename.lower().endswith('.pdf'):
             raise HTTPException(status_code=400, detail="File must be a PDF")
-            
+
         processor = AIProcessor(provider=provider)
         result = await processor.process_pdf(
             file,
@@ -326,6 +347,16 @@ async def process_pdf(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/extract-table-from-page")
+async def extract_table(request: URLRequest):
+    try:
+        table_data = await extract_table_from_url(request.url)
+        return {"data": table_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Error handler
 @app.exception_handler(Exception)

@@ -2,13 +2,13 @@ import base64
 import os
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-from fastapi import UploadFile
 import numpy as np
 import openai
 import pandas as pd
 import requests
+from fastapi import UploadFile
 
 from .base_provider import BaseAIProvider
 from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL, OPENAI_VISION_MODEL, OPENAI_EMBEDDING_MODEL
@@ -146,7 +146,7 @@ class OpenAIProvider(BaseAIProvider):
                 engines = ['openpyxl', 'xlrd']
                 df = None
                 last_error = None
-                
+
                 for engine in engines:
                     try:
                         df = pd.read_excel(file_path, engine=engine)
@@ -154,58 +154,59 @@ class OpenAIProvider(BaseAIProvider):
                     except Exception as e:
                         last_error = e
                         continue
-                
+
                 if df is None:
                     raise Exception(f"Failed to read file with any method: {last_error}")
-            
+
             # Clean the data by replacing special float values
             # First, replace infinity values with None
             df = df.replace([np.inf, -np.inf], None)
-            
+
             # Then, replace NaN values with None for all columns
             df = df.where(pd.notnull(df), None)
-            
+
             # Convert all numeric columns to strings to handle any remaining out-of-range values
             for col in df.select_dtypes(include=['float64', 'int64']).columns:
                 df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-            
+
             # Detect header row dynamically
             header_row = self._detect_header_row(df)
-            
+
             if header_row is not None:
                 # Use this row as the header
                 df.columns = df.iloc[header_row]
                 # Remove the header row and any rows before it
-                df = df.iloc[header_row+1:].reset_index(drop=True)
-            
+                df = df.iloc[header_row + 1:].reset_index(drop=True)
+
             # Handle merged columns in the header
             df = self._handle_merged_columns(df)
-            
+
             # Clean column names
             df = self._clean_column_names(df)
-            
+
             # Convert DataFrame to a string representation for the prompt
             excel_str = df.to_string()
-            
+
             # Create a prompt that includes the Excel data
             analysis_prompt = prompt or "Analyze this Excel data and provide insights."
             full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-            
+
             # Use OpenAI to analyze the data
             model_name = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
             response = self.client.chat.completions.create(
                 model=model_name,
                 messages=[
-                    {"role": "system", "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
+                    {"role": "system",
+                     "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
                     {"role": "user", "content": full_prompt}
                 ],
                 temperature=kwargs.get('temperature', 0.7),
                 max_tokens=kwargs.get('max_tokens', 1000)
             )
-            
+
             # Convert DataFrame to dict with proper handling of special values
             data_dict = self._convert_df_to_json_safe_dict(df)
-            
+
             # Return both the analysis and the structured data
             return {
                 "analysis": response.choices[0].message.content,
@@ -227,28 +228,28 @@ class OpenAIProvider(BaseAIProvider):
                     r'spreadsheets/d/([a-zA-Z0-9-_]+)',  # Alternative format
                     r'/([a-zA-Z0-9-_]{25,})'  # Fallback for long IDs
                 ]
-                
+
                 spreadsheet_id = None
                 for pattern in patterns:
                     match = re.search(pattern, url)
                     if match:
                         spreadsheet_id = match.group(1)
                         break
-                
+
                 if not spreadsheet_id:
                     raise Exception("Could not extract spreadsheet ID from Google Sheets URL")
-                
+
                 # Try different export formats and methods
                 export_formats = ['csv', 'xlsx']
                 excel_data = None
                 last_error = None
-                
+
                 for format in export_formats:
                     try:
                         # Try direct export URL
                         export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format={format}"
                         response = requests.get(export_url)
-                        
+
                         if response.status_code == 200:
                             excel_data = response.content
                             break
@@ -256,7 +257,7 @@ class OpenAIProvider(BaseAIProvider):
                             # Try alternative export URL format
                             alt_export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:{format}"
                             alt_response = requests.get(alt_export_url)
-                            
+
                             if alt_response.status_code == 200:
                                 excel_data = alt_response.content
                                 break
@@ -265,15 +266,15 @@ class OpenAIProvider(BaseAIProvider):
                     except Exception as e:
                         last_error = str(e)
                         continue
-                
+
                 if not excel_data:
                     raise Exception(f"Failed to download Google Sheet data: {last_error}")
-                
+
                 # Save the downloaded data to a temporary file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{export_formats[0]}") as temp_file:
                     temp_file.write(excel_data)
                     temp_file_path = temp_file.name
-                
+
                 try:
                     # Try to read the file as CSV first
                     try:
@@ -283,7 +284,7 @@ class OpenAIProvider(BaseAIProvider):
                         engines = ['openpyxl', 'xlrd']
                         df = None
                         last_error = None
-                        
+
                         for engine in engines:
                             try:
                                 df = pd.read_excel(temp_file_path, engine=engine)
@@ -291,56 +292,57 @@ class OpenAIProvider(BaseAIProvider):
                             except Exception as e:
                                 last_error = e
                                 continue
-                        
+
                         if df is None:
                             raise Exception(f"Failed to read file with any method: {last_error}")
-                    
+
                     # Clean the data by replacing special float values
                     # First, replace infinity values with None
                     df = df.replace([np.inf, -np.inf], None)
-                    
+
                     # Then, replace NaN values with None for all columns
                     df = df.where(pd.notnull(df), None)
-                    
+
                     # Convert all numeric columns to strings to handle any remaining out-of-range values
                     for col in df.select_dtypes(include=['float64', 'int64']).columns:
                         df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
+
                     # Detect header row dynamically
                     header_row = self._detect_header_row(df)
-                    
+
                     if header_row is not None:
                         # Use this row as the header
                         df.columns = df.iloc[header_row]
                         # Remove the header row and any rows before it
-                        df = df.iloc[header_row+1:].reset_index(drop=True)
-                    
+                        df = df.iloc[header_row + 1:].reset_index(drop=True)
+
                     # Handle merged columns in the header
                     df = self._handle_merged_columns(df)
-                    
+
                     # Clean column names
                     df = self._clean_column_names(df)
-                    
+
                     # Convert DataFrame to a string representation for the prompt
                     excel_str = df.to_string()
-                    
+
                     # Create a prompt that includes the Excel data
                     analysis_prompt = prompt or "Analyze this Excel data and provide insights."
                     full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
+
                     # Use the OpenAI model to analyze the data
                     model_name = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
                     response = self.client.chat.completions.create(
                         model=model_name,
                         messages=[
-                            {"role": "system", "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
+                            {"role": "system",
+                             "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
                             {"role": "user", "content": full_prompt}
                         ]
                     )
-                    
+
                     # Convert DataFrame to dict with proper handling of special values
                     data_dict = self._convert_df_to_json_safe_dict(df)
-                    
+
                     # Return both the analysis and the structured data
                     return {
                         "analysis": response.choices[0].message.content,
@@ -354,17 +356,17 @@ class OpenAIProvider(BaseAIProvider):
                 response = requests.get(url)
                 if response.status_code != 200:
                     raise Exception(f"Failed to download Excel file: HTTP {response.status_code}")
-                
+
                 # Determine file type from content or URL
                 content_type = response.headers.get('Content-Type', '')
                 file_extension = url.split('.')[-1].lower() if '.' in url else ''
-                
+
                 # Save the downloaded data to a temporary file
                 suffix = ".csv" if (content_type == 'text/csv' or file_extension == 'csv') else ".xlsx"
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
                     temp_file.write(response.content)
                     temp_file_path = temp_file.name
-                
+
                 try:
                     # Try to read the file as CSV first
                     try:
@@ -374,7 +376,7 @@ class OpenAIProvider(BaseAIProvider):
                         engines = ['openpyxl', 'xlrd']
                         df = None
                         last_error = None
-                        
+
                         for engine in engines:
                             try:
                                 df = pd.read_excel(temp_file_path, engine=engine)
@@ -382,56 +384,57 @@ class OpenAIProvider(BaseAIProvider):
                             except Exception as e:
                                 last_error = e
                                 continue
-                        
+
                         if df is None:
                             raise Exception(f"Failed to read file with any method: {last_error}")
-                    
+
                     # Clean the data by replacing special float values
                     # First, replace infinity values with None
                     df = df.replace([np.inf, -np.inf], None)
-                    
+
                     # Then, replace NaN values with None for all columns
                     df = df.where(pd.notnull(df), None)
-                    
+
                     # Convert all numeric columns to strings to handle any remaining out-of-range values
                     for col in df.select_dtypes(include=['float64', 'int64']).columns:
                         df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-                    
+
                     # Detect header row dynamically
                     header_row = self._detect_header_row(df)
-                    
+
                     if header_row is not None:
                         # Use this row as the header
                         df.columns = df.iloc[header_row]
                         # Remove the header row and any rows before it
-                        df = df.iloc[header_row+1:].reset_index(drop=True)
-                    
+                        df = df.iloc[header_row + 1:].reset_index(drop=True)
+
                     # Handle merged columns in the header
                     df = self._handle_merged_columns(df)
-                    
+
                     # Clean column names
                     df = self._clean_column_names(df)
-                    
+
                     # Convert DataFrame to a string representation for the prompt
                     excel_str = df.to_string()
-                    
+
                     # Create a prompt that includes the Excel data
                     analysis_prompt = prompt or "Analyze this Excel data and provide insights."
                     full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-                    
+
                     # Use the OpenAI model to analyze the data
                     model_name = kwargs.get('model') if kwargs.get('model') else OPENAI_DEFAULT_MODEL
                     response = self.client.chat.completions.create(
                         model=model_name,
                         messages=[
-                            {"role": "system", "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
+                            {"role": "system",
+                             "content": "You are a data analyst. Analyze the provided Excel data and provide insights."},
                             {"role": "user", "content": full_prompt}
                         ]
                     )
-                    
+
                     # Convert DataFrame to dict with proper handling of special values
                     data_dict = self._convert_df_to_json_safe_dict(df)
-                    
+
                     # Return both the analysis and the structured data
                     return {
                         "analysis": response.choices[0].message.content,
@@ -453,12 +456,12 @@ class OpenAIProvider(BaseAIProvider):
             # Read the PDF file content
             pdf_content = await pdf_file.read()
             pdf_file_obj = io.BytesIO(pdf_content)
-            
+
             all_table_data = []
             full_text = ""
             page_headers = {}  # Store headers by page number
             first_table_headers = None  # Store headers from first table found
-            
+
             # Open PDF with pdfplumber
             with pdfplumber.open(pdf_file_obj) as pdf:
                 # Process each page
@@ -466,33 +469,33 @@ class OpenAIProvider(BaseAIProvider):
                     # Extract page text
                     page_text = page.extract_text() or ""
                     full_text += page_text + "\n"
-                    
+
                     try:
                         # Extract tables from the page
                         tables = page.extract_tables()
-                        
+
                         if tables:
                             for table_num, table in enumerate(tables, 1):
                                 # Clean and validate table data
                                 cleaned_table = await self._clean_table_data(table)
-                                
+
                                 if cleaned_table:
                                     # Get appropriate headers for this table
                                     headers, is_header_row = await self._detect_and_validate_headers(
                                         cleaned_table,
                                         first_table_headers  # Pass headers from first table as fallback
                                     )
-                                    
+
                                     # Store headers from first table found
                                     if first_table_headers is None and headers:
                                         first_table_headers = headers.copy()
-                                    
+
                                     # Store headers for this page/table combination
                                     page_headers[f"page_{page_num}_table_{table_num}"] = headers
-                                    
+
                                     # Skip header row if it was detected as a header
                                     table_data = cleaned_table[1:] if is_header_row else cleaned_table
-                                    
+
                                     if table_data:  # Process only if we have data rows
                                         # Process table data with AI
                                         formatted_data = await self._format_table_data(
@@ -502,14 +505,14 @@ class OpenAIProvider(BaseAIProvider):
                                             temperature=kwargs.get('temperature', 0.2),
                                             max_tokens=kwargs.get('max_tokens', 2000)
                                         )
-                                        
+
                                         if formatted_data:
                                             # Add page and table information to each row
                                             for row in formatted_data:
                                                 row['_page_number'] = page_num
                                                 row['_table_number'] = table_num
                                             all_table_data.extend(formatted_data)
-                    
+
                     except Exception as table_error:
                         # Log the error but continue processing other tables
                         print(f"Error processing table on page {page_num}: {str(table_error)}")
@@ -552,7 +555,7 @@ class OpenAIProvider(BaseAIProvider):
             # Skip completely empty rows
             if not any(cell for cell in row if cell is not None):
                 continue
-                
+
             cleaned_row = []
             for cell in row:
                 # Convert cell to string and clean it
@@ -561,47 +564,49 @@ class OpenAIProvider(BaseAIProvider):
                 else:
                     cleaned_cell = str(cell).strip()
                     cleaned_cell = (cleaned_cell
-                        .replace('"', "'")
-                        .replace('\n', ' ')
-                        .replace('\r', '')
-                        .replace('\t', ' ')
-                        .replace('\\', '/')
-                    )
+                                    .replace('"', "'")
+                                    .replace('\n', ' ')
+                                    .replace('\r', '')
+                                    .replace('\t', ' ')
+                                    .replace('\\', '/')
+                                    )
                     cleaned_cell = ' '.join(cleaned_cell.split())
-                
+
                 cleaned_row.append(cleaned_cell)
-            
+
             if any(cell for cell in cleaned_row):
                 cleaned_table.append(cleaned_row)
-        
+
         return cleaned_table
 
-    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[List[str], bool]:
+    async def _detect_and_validate_headers(self, table: List[List[str]], previous_headers: List[str] = None) -> Tuple[
+        List[str], bool]:
         """Detect and validate table headers, using previous headers as fallback"""
         if not table or not table[0]:
             return previous_headers or [], False
 
         first_row = table[0]
-        
+
         # Check if first row looks like a header
         non_empty_cells = [cell for cell in first_row if cell.strip()]
         if non_empty_cells:
             # Calculate metrics for header detection
-            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(non_empty_cells)
+            non_numeric_ratio = sum(1 for cell in non_empty_cells if not str(cell).replace('.', '').isdigit()) / len(
+                non_empty_cells)
             unique_ratio = len(set(non_empty_cells)) / len(non_empty_cells)
             avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
-            
-            is_header = (non_numeric_ratio > 0.7 and 
-                        unique_ratio > 0.8 and 
-                        3 <= avg_length <= 30)
-            
+
+            is_header = (non_numeric_ratio > 0.7 and
+                         unique_ratio > 0.8 and
+                         3 <= avg_length <= 30)
+
             if is_header:
                 # Clean and format headers
                 headers = [
-                    str(cell).strip() or f"Column_{i+1}"
+                    str(cell).strip() or f"Column_{i + 1}"
                     for i, cell in enumerate(first_row)
                 ]
-                
+
                 # Make headers unique
                 seen_headers = set()
                 unique_headers = []
@@ -613,14 +618,14 @@ class OpenAIProvider(BaseAIProvider):
                         counter += 1
                     seen_headers.add(header)
                     unique_headers.append(header)
-                
+
                 return unique_headers, True
-        
+
         # If no valid header detected, use previous headers or generate generic ones
         if previous_headers and len(previous_headers) >= len(first_row):
             return previous_headers[:len(first_row)], False
         else:
-            return [f"Column_{i+1}" for i in range(len(first_row))], False
+            return [f"Column_{i + 1}" for i in range(len(first_row))], False
 
     async def _format_table_data(self, headers: List[str], rows: List[List[str]], **kwargs) -> List[Dict[str, str]]:
         """Format extracted table data using OpenAI"""
@@ -645,7 +650,7 @@ class OpenAIProvider(BaseAIProvider):
                         cleaned_value = str(value).strip().replace('"', '\\"').replace('\n', ' ').replace('\r', '')
                         row_dict[header] = cleaned_value
                 formatted_rows.append(row_dict)
-            
+
             # Create a prompt with pre-formatted data
             user_prompt = f"""Format this data as a valid JSON array. Use these exact column headers: {headers}
             
@@ -663,7 +668,7 @@ class OpenAIProvider(BaseAIProvider):
                 ],
                 temperature=0.1,
                 max_tokens=kwargs.get('max_tokens', 4000),
-                response_format={ "type": "json" }
+                response_format={"type": "json"}
             )
 
             try:
@@ -672,7 +677,7 @@ class OpenAIProvider(BaseAIProvider):
                 content = content.replace('\n', ' ').replace('\r', '')
                 content = re.sub(r',\s*]', ']', content)
                 content = re.sub(r'\s+', ' ', content)
-                
+
                 if not content.startswith('['):
                     array_start = content.find('[')
                     array_end = content.rfind(']')
@@ -742,30 +747,32 @@ class OpenAIProvider(BaseAIProvider):
         # Check the first few rows
         for i in range(min(max_rows_to_check, len(df))):
             row = df.iloc[i]
-            
+
             # Skip completely empty rows
             if row.isna().all():
                 continue
-                
+
             # Calculate metrics for this row
-            non_numeric_ratio = sum(1 for val in row if pd.notnull(val) and not str(val).replace('.', '').isdigit()) / len(row)
+            non_numeric_ratio = sum(
+                1 for val in row if pd.notnull(val) and not str(val).replace('.', '').isdigit()) / len(row)
             unique_values_ratio = len(set(str(val).strip() for val in row if pd.notnull(val))) / len(row)
-            avg_value_length = sum(len(str(val).strip()) for val in row if pd.notnull(val)) / max(1, sum(pd.notnull(val) for val in row))
-            
+            avg_value_length = sum(len(str(val).strip()) for val in row if pd.notnull(val)) / max(1, sum(
+                pd.notnull(val) for val in row))
+
             # A good header row typically has:
             # 1. High ratio of non-numeric values (column names are usually text)
             # 2. High ratio of unique values (column names should be unique)
             # 3. Reasonable average length (not too short, not too long)
-            if (non_numeric_ratio > 0.7 and 
-                unique_values_ratio > 0.8 and 
-                3 <= avg_value_length <= 30):
+            if (non_numeric_ratio > 0.7 and
+                    unique_values_ratio > 0.8 and
+                    3 <= avg_value_length <= 30):
                 return i
-        
+
         # If no clear header is found, use the first non-empty row
         for i in range(min(max_rows_to_check, len(df))):
             if not df.iloc[i].isna().all():
                 return i
-        
+
         return 0
 
     def _handle_merged_columns(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -792,9 +799,9 @@ class OpenAIProvider(BaseAIProvider):
                         else:
                             # Add a new column with the part as the name
                             df[part] = None
-        
+
         return df
-        
+
     def _clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Minimally clean column names while preserving original names.
@@ -826,7 +833,7 @@ class OpenAIProvider(BaseAIProvider):
 
         df.columns = cleaned_columns
         return df
-        
+
     def _convert_df_to_json_safe_dict(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """
         Convert DataFrame to JSON format preserving original column names.
@@ -843,7 +850,7 @@ class OpenAIProvider(BaseAIProvider):
                 # Use original column name
                 row_dict[str(col_name)] = clean_value
             data.append(row_dict)
-            
+
         return data
 
     def _detect_column_type(self, column_values) -> str:
@@ -867,7 +874,7 @@ class OpenAIProvider(BaseAIProvider):
             try:
                 nums = [float(v) for v in values]
                 if len(nums) >= 2:
-                    is_sequential = all(abs(nums[i] - nums[i-1]) <= 5 for i in range(1, len(nums)))
+                    is_sequential = all(abs(nums[i] - nums[i - 1]) <= 5 for i in range(1, len(nums)))
                     if is_sequential:
                         return 'sequence'
             except ValueError:
@@ -883,7 +890,8 @@ class OpenAIProvider(BaseAIProvider):
 
         # Check for phone numbers
         phone_pattern = sum(
-            (str(v).startswith(('0', '+84', '*')) and len(str(v).replace('+84', '0').replace('*', '').replace(' ', '')) in (9, 10, 11))
+            (str(v).startswith(('0', '+84', '*')) and len(
+                str(v).replace('+84', '0').replace('*', '').replace(' ', '')) in (9, 10, 11))
             or (str(v).isdigit() and len(str(v)) in (9, 10))
             for v in values
         ) / len(values)

@@ -69,7 +69,8 @@ class AIProcessor:
         """
         try:
             # Check if provider is specified in kwargs and is different from current provider
-            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace('provider', ''):
+            if 'provider' in kwargs and kwargs['provider'] != self.provider.__class__.__name__.lower().replace(
+                    'provider', ''):
                 # Initialize a new provider with the specified provider name
                 self.provider = self._initialize_provider(kwargs['provider'])
                 # Remove provider from kwargs to avoid passing it to the provider method

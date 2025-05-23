@@ -1,12 +1,13 @@
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+
 import torch
-from transformers import DetrImageProcessor, TableTransformerForObjectDetection
 from PIL import Image
-import numpy as np
+from transformers import DetrImageProcessor, TableTransformerForObjectDetection
+
 
 class TableDetector:
     """Table detection using Microsoft's Table Transformer model"""
-    
+
     def __init__(self):
         self.processor = DetrImageProcessor.from_pretrained("microsoft/table-transformer-detection")
         self.model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
@@ -24,25 +25,25 @@ class TableDetector:
         """
         # Prepare image for the model
         inputs = self.processor(images=image, return_tensors="pt")
-        
+
         # Get predictions
         with torch.no_grad():
             outputs = self.model(**inputs)
-        
+
         # Convert outputs to normalized coordinates
         target_sizes = torch.tensor([image.size[::-1]])
         results = self.processor.post_process_object_detection(
-            outputs, 
+            outputs,
             target_sizes=target_sizes,
             threshold=self.confidence_threshold
         )[0]
-        
+
         # Extract bounding boxes
         boxes = []
         for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
             box = [round(i) for i in box.tolist()]
             boxes.append(tuple(box))
-            
+
         return boxes
 
     def extract_tables(self, image: Image.Image) -> List[Image.Image]:
@@ -57,13 +58,13 @@ class TableDetector:
         """
         # Detect tables
         boxes = self.detect_tables(image)
-        
+
         # Crop and return table regions
         tables = []
         for box in boxes:
             table_region = image.crop(box)
             tables.append(table_region)
-            
+
         return tables
 
     def process_image(self, image_path: str) -> List[Image.Image]:
@@ -81,10 +82,10 @@ class TableDetector:
             image = Image.open(image_path)
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-            
+
             # Extract tables
             return self.extract_tables(image)
-            
+
         except Exception as e:
             print(f"Error processing image: {e}")
             return []
