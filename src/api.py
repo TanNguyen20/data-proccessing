@@ -186,31 +186,6 @@ async def process_image(
         os.unlink(temp_file_path)
 
 
-@app.post("/chat")
-@handle_ai_errors
-async def chat(request: ChatRequest, processor: AIProcessor = Depends(get_processor)):
-    if request.stream:
-        async def generate():
-            for line in processor.stream_chat(
-                    request.messages,
-                    model=request.model,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens
-            ):
-                if line:
-                    yield f"data: {line.decode('utf-8')}\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-    else:
-        result = processor.chat(
-            request.messages,
-            model=request.model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens
-        )
-        return {"result": result}
-
-
 @app.get("/embedding")
 @handle_ai_errors
 async def get_embedding(
@@ -310,17 +285,40 @@ async def process_excel_url(request: ExcelUrlRequest):
         The processed Excel data and analysis
     """
     try:
+        # Get the file extension from the URL
+        file_extension = os.path.splitext(str(request.excel_url))[1].lower()
+        
+        # Validate file extension for direct Excel URLs
+        if not str(request.excel_url).startswith(('https://docs.google.com/spreadsheets')):
+            if file_extension not in ['.xlsx', '.xls', '.csv']:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file format. Supported formats: .xlsx, .xls, .csv"
+                )
+
+        # Prepare kwargs for the processor
+        kwargs = {}
+        if request.model:
+            kwargs["model"] = request.model
+        if request.prompt:
+            kwargs["prompt"] = request.prompt
+        if request.temperature:
+            kwargs["temperature"] = request.temperature
+        if request.max_tokens:
+            kwargs["max_tokens"] = request.max_tokens
+
+        # Process the Excel URL
         processor = AIProcessor(provider=request.provider)
         result = await processor.process_excel_url(
             str(request.excel_url),
-            prompt=request.prompt,
-            model=request.model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens
+            **kwargs
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing Excel URL: {str(e)}"
+        )
 
 
 @app.post("/process-pdf")

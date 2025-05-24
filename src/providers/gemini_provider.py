@@ -239,6 +239,13 @@ class GeminiProvider(BaseAIProvider):
     async def process_excel_url(self, url: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file from URL using Gemini"""
         try:
+            # Check if required Excel engines are installed
+            try:
+                import openpyxl
+                import xlrd
+            except ImportError as e:
+                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
                 # Extract the spreadsheet ID from the URL
@@ -294,84 +301,6 @@ class GeminiProvider(BaseAIProvider):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=f".{export_formats[0]}") as temp_file:
                     temp_file.write(excel_data)
                     temp_file_path = temp_file.name
-
-                try:
-                    # Try to read the file as CSV first
-                    try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
-
-                        for engine in engines:
-                            try:
-                                df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
-
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
-
-                    # Clean the data by replacing special float values
-                    # First, replace infinity values with None
-                    df = df.replace([np.inf, -np.inf], None)
-
-                    # Then, replace NaN values with None for all columns
-                    df = df.where(pd.notnull(df), None)
-
-                    # Convert all numeric columns to strings to handle any remaining out-of-range values
-                    for col in df.select_dtypes(include=['float64', 'int64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
-
-                    # Detect header row dynamically
-                    header_row = self._detect_header_row(df)
-
-                    if header_row is not None:
-                        # Use this row as the header
-                        df.columns = df.iloc[header_row]
-                        # Remove the header row and any rows before it
-                        df = df.iloc[header_row + 1:].reset_index(drop=True)
-
-                    # Handle merged columns in the header
-                    df = self._handle_merged_columns(df)
-
-                    # Clean column names
-                    df = self._clean_column_names(df)
-
-                    # Convert DataFrame to a string representation for the prompt
-                    excel_str = df.to_string()
-
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
-
-                    # Use the Gemini model to analyze the data
-                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-                    model = genai.GenerativeModel(model_name)
-
-                    response = model.generate_content(
-                        full_prompt,
-                        generation_config=genai.types.GenerationConfig(
-                            temperature=kwargs.get('temperature', 0.7),
-                            max_output_tokens=kwargs.get('max_tokens', 1000)
-                        )
-                    )
-
-                    # Convert DataFrame to dict with proper handling of special values
-                    data_dict = self._convert_df_to_json_safe_dict(df)
-
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.text,
-                        "data": data_dict
-                    }
-                finally:
-                    # Clean up the temporary file
-                    os.unlink(temp_file_path)
             else:
                 # For regular Excel URLs, download the file
                 response = requests.get(url)
@@ -388,82 +317,109 @@ class GeminiProvider(BaseAIProvider):
                     temp_file.write(response.content)
                     temp_file_path = temp_file.name
 
-                try:
-                    # Try to read the file as CSV first
+            try:
+                # Try different methods to read the file
+                df = None
+                last_error = None
+
+                # First try to read as CSV with different encodings
+                encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+                for encoding in encodings:
                     try:
-                        df = pd.read_csv(temp_file_path)
-                    except Exception as csv_error:
-                        # If CSV reading fails, try Excel engines
-                        engines = ['openpyxl', 'xlrd']
-                        df = None
-                        last_error = None
+                        df = pd.read_csv(temp_file_path, encoding=encoding)
+                        break
+                    except Exception as e:
+                        last_error = e
+                        continue
 
-                        for engine in engines:
-                            try:
+                # If CSV reading fails, try Excel engines
+                if df is None:
+                    engines = ['openpyxl', 'xlrd']
+                    for engine in engines:
+                        try:
+                            # For xlrd engine, we need to specify the engine explicitly
+                            if engine == 'xlrd':
                                 df = pd.read_excel(temp_file_path, engine=engine)
-                                break
-                            except Exception as e:
-                                last_error = e
-                                continue
+                            else:
+                                # For openpyxl, try with default settings first
+                                try:
+                                    df = pd.read_excel(temp_file_path, engine=engine)
+                                except Exception:
+                                    # If that fails, try with additional parameters
+                                    df = pd.read_excel(
+                                        temp_file_path,
+                                        engine=engine,
+                                        sheet_name=0,  # Read first sheet
+                                        header=None  # Don't assume header row
+                                    )
+                            break
+                        except Exception as e:
+                            last_error = e
+                            continue
 
-                        if df is None:
-                            raise Exception(f"Failed to read file with any method: {last_error}")
+                if df is None:
+                    # Provide more detailed error information
+                    error_msg = f"Failed to read file with any method. Last error: {str(last_error)}"
+                    if "Excel xlsx file; not supported" in str(last_error):
+                        error_msg += "\nPlease ensure the file is a valid Excel file and not corrupted."
+                    raise Exception(error_msg)
 
-                    # Clean the data by replacing special float values
-                    # First, replace infinity values with None
-                    df = df.replace([np.inf, -np.inf], None)
+                # Clean the data by replacing special float values
+                # First, replace infinity values with None
+                df = df.replace([np.inf, -np.inf], None)
 
-                    # Then, replace NaN values with None for all columns
-                    df = df.where(pd.notnull(df), None)
+                # Then, replace NaN values with None for all columns
+                df = df.where(pd.notnull(df), None)
 
-                    # Convert all numeric columns to strings to handle any remaining out-of-range values
-                    for col in df.select_dtypes(include=['float64', 'int64']).columns:
-                        df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
+                # Convert all numeric columns to strings to handle any remaining out-of-range values
+                for col in df.select_dtypes(include=['float64', 'int64']).columns:
+                    df[col] = df[col].apply(lambda x: str(x) if pd.notnull(x) else None)
 
-                    # Detect header row dynamically
-                    header_row = self._detect_header_row(df)
+                # Detect header row dynamically
+                header_row = self._detect_header_row(df)
 
-                    if header_row is not None:
-                        # Use this row as the header
-                        df.columns = df.iloc[header_row]
-                        # Remove the header row and any rows before it
-                        df = df.iloc[header_row + 1:].reset_index(drop=True)
+                if header_row is not None:
+                    # Use this row as the header
+                    df.columns = df.iloc[header_row]
+                    # Remove the header row and any rows before it
+                    df = df.iloc[header_row + 1:].reset_index(drop=True)
 
-                    # Handle merged columns in the header
-                    df = self._handle_merged_columns(df)
+                # Handle merged columns in the header
+                df = self._handle_merged_columns(df)
 
-                    # Clean column names
-                    df = self._clean_column_names(df)
+                # Clean column names
+                df = self._clean_column_names(df)
 
-                    # Convert DataFrame to a string representation for the prompt
-                    excel_str = df.to_string()
+                # Convert DataFrame to a string representation for the prompt
+                excel_str = df.to_string()
 
-                    # Create a prompt that includes the Excel data
-                    analysis_prompt = prompt or "Analyze this Excel data and provide insights."
-                    full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
+                # Create a prompt that includes the Excel data
+                analysis_prompt = prompt or "Analyze this Excel data and provide insights."
+                full_prompt = f"{analysis_prompt}\n\nExcel Data:\n{excel_str}"
 
-                    # Use the Gemini model to analyze the data
-                    model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-                    model = genai.GenerativeModel(model_name)
+                # Use the Gemini model to analyze the data
+                model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+                model = genai.GenerativeModel(model_name)
 
-                    response = model.generate_content(
-                        full_prompt,
-                        generation_config=genai.types.GenerationConfig(
-                            temperature=kwargs.get('temperature', 0.7),
-                            max_output_tokens=kwargs.get('max_tokens', 1000)
-                        )
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=kwargs.get('temperature', 0.7),
+                        max_output_tokens=kwargs.get('max_tokens', 1000)
                     )
+                )
 
-                    # Convert DataFrame to dict with proper handling of special values
-                    data_dict = self._convert_df_to_json_safe_dict(df)
+                # Convert DataFrame to dict with proper handling of special values
+                data_dict = self._convert_df_to_json_safe_dict(df)
 
-                    # Return both the analysis and the structured data
-                    return {
-                        "analysis": response.text,
-                        "data": data_dict
-                    }
-                finally:
-                    # Clean up the temporary file
+                # Return both the analysis and the structured data
+                return {
+                    "analysis": response.text,
+                    "data": data_dict
+                }
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
 
         except Exception as e:
