@@ -16,6 +16,19 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
+    async def generate_text(self, prompt: str, **kwargs) -> str:
+        """Generate text based on the given prompt
+        
+        Args:
+            prompt (str): The prompt to generate text from
+            **kwargs: Additional arguments like temperature, max_tokens, etc.
+            
+        Returns:
+            str: The generated text
+        """
+        pass
+
+    @abstractmethod
     def process_text(self, text: str, **kwargs) -> str:
         """Process text using the AI provider"""
         pass

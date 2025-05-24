@@ -903,3 +903,27 @@ class OpenAIProvider(BaseAIProvider):
             return 'name'
 
         return None
+
+    async def generate_text(self, prompt: str, **kwargs) -> str:
+        """Generate text based on the given prompt using OpenAI
+        
+        Args:
+            prompt (str): The prompt to generate text from
+            **kwargs: Additional arguments like temperature, max_tokens, etc.
+            
+        Returns:
+            str: The generated text
+        """
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            
+            completion = self.client.chat.completions.create(
+                model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
+                messages=messages,
+                temperature=kwargs.get('temperature', 0.7),
+                max_tokens=kwargs.get('max_tokens', 1000)
+            )
+            return completion.choices[0].message.content
+            
+        except Exception as e:
+            raise Exception(f"Error generating text with OpenAI: {str(e)}")

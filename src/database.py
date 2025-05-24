@@ -4,10 +4,11 @@ import os
 from dotenv import load_dotenv
 from urllib.parse import urlparse, unquote
 from fastapi import UploadFile
-from .providers.base_provider import BaseProvider
-from .providers.openai_provider import OpenAIProvider
-from .providers.gemini_provider import GeminiProvider
-from .providers.xai_provider import XAIProvider
+
+from providers.base_provider import BaseAIProvider
+from providers.openai_provider import OpenAIProvider
+from providers.gemini_provider import GeminiProvider
+from providers.xai_provider import XAIProvider
 
 # Load environment variables
 load_dotenv()
@@ -23,7 +24,7 @@ def get_mongodb_client() -> MongoClient:
         raise ValueError("MongoDB URI not found in environment variables")
     return MongoClient(MONGODB_URI)
 
-def get_ai_provider(provider_name: str = None) -> BaseProvider:
+def get_ai_provider(provider_name: str = None) -> BaseAIProvider:
     """
     Get the appropriate AI provider instance
     

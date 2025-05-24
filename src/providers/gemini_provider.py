@@ -839,3 +839,29 @@ class GeminiProvider(BaseAIProvider):
             data.append(row_dict)
 
         return data
+
+    async def generate_text(self, prompt: str, **kwargs) -> str:
+        """Generate text based on the given prompt using Gemini
+        
+        Args:
+            prompt (str): The prompt to generate text from
+            **kwargs: Additional arguments like temperature, max_tokens, etc.
+            
+        Returns:
+            str: The generated text
+        """
+        try:
+            model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
+            model = genai.GenerativeModel(model_name)
+            
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=kwargs.get('temperature', 0.7),
+                    max_output_tokens=kwargs.get('max_tokens', 1000)
+                )
+            )
+            return response.text
+            
+        except Exception as e:
+            raise Exception(f"Error generating text with Gemini: {str(e)}")

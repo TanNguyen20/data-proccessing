@@ -4,6 +4,7 @@ import tempfile
 import traceback
 from functools import wraps
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends
@@ -13,6 +14,7 @@ from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
 from .utils.page_extractor import extract_table_as_json
+from .database import DatabaseNameGenerator, insert_json_data, insert_many_json_data
 
 # Configure logging
 logging.basicConfig(
@@ -352,8 +354,35 @@ async def process_pdf(
 @app.post("/extract-table-from-page")
 async def extract_table(request: URLRequest):
     try:
+        # Extract table data
         table_data = await extract_table_as_json(request.url)
-        return {"data": table_data}
+        
+        # Generate collection name from URL
+        collection_name = await DatabaseNameGenerator.generate_table_name_from_url(
+            request.url,
+            db_type='mongodb',
+            max_length=30,
+            use_domain=True
+        )
+        
+        # Create a document for each row with metadata
+        documents = []
+        for row in table_data:
+            document = {
+                "url": request.url,
+                "extracted_at": datetime.utcnow(),
+                "data": row
+            }
+            documents.append(document)
+        
+        # Store all documents in MongoDB
+        doc_ids = insert_many_json_data(collection_name, documents)
+        
+        return {
+            "data": table_data,
+            "collection_name": collection_name,
+            "document_ids": doc_ids
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
