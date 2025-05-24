@@ -318,7 +318,7 @@ async def process_pdf(
         max_tokens: int = 2000
 ):
     """
-    Process PDF file with table data using AI.
+    Process PDF file with table data using AI and save results to MongoDB.
     
     Args:
         file: The PDF file to process
@@ -333,6 +333,8 @@ async def process_pdf(
         - table_data: Structured table data from the PDF
         - analysis: Overall analysis of the document
         - page_count: Number of pages in the PDF
+        - collection_name: Name of the MongoDB collection where data is stored
+        - document_ids: List of IDs of the stored documents
     """
     try:
         if not file.filename.lower().endswith('.pdf'):
@@ -346,6 +348,35 @@ async def process_pdf(
             temperature=temperature,
             max_tokens=max_tokens
         )
+
+        # Generate collection name from filename
+        collection_name = await DatabaseNameGenerator.generate_table_name_from_file_content(
+            file,
+            db_type='mongodb',
+            max_length=30
+        )
+
+        # Create documents for each table row with metadata
+        documents = []
+        for row in result.get('table_data', []):
+            document = {
+                "filename": file.filename,
+                "processed_at": datetime.utcnow(),
+                "analysis": result.get('analysis'),
+                "page_count": result.get('page_count'),
+                "data": row
+            }
+            documents.append(document)
+
+        # Store all documents in MongoDB
+        doc_ids = insert_many_json_data(collection_name, documents)
+
+        # Add MongoDB info to the result
+        result.update({
+            "collection_name": collection_name,
+            "document_ids": doc_ids
+        })
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

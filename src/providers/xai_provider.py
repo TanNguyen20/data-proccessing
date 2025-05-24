@@ -790,7 +790,7 @@ class XAIProvider(BaseAIProvider):
 
         # Check the first few rows
         for i in range(min(max_rows_to_check, len(df))):
-            row = df.iloc(i)
+            row = df.iloc[i]
 
             # Skip completely empty rows
             if row.isna().all():
@@ -814,7 +814,7 @@ class XAIProvider(BaseAIProvider):
 
         # If no clear header is found, use the first non-empty row
         for i in range(min(max_rows_to_check, len(df))):
-            if not df.iloc(i).isna().all():
+            if not df.iloc[i].isna().all():
                 return i
 
         return 0

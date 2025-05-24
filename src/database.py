@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse, unquote
 from fastapi import UploadFile
 
-from providers.base_provider import BaseAIProvider
-from providers.openai_provider import OpenAIProvider
-from providers.gemini_provider import GeminiProvider
-from providers.xai_provider import XAIProvider
+from src.providers.base_provider import BaseAIProvider
+from src.providers.gemini_provider import GeminiProvider
+from src.providers.openai_provider import OpenAIProvider
+from src.providers.xai_provider import XAIProvider
 
 # Load environment variables
 load_dotenv()
