@@ -245,8 +245,18 @@ async def process_excel_file(
         The processed Excel data and analysis
     """
     try:
-        # Save the uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_file:
+        # Get the file extension from the original filename
+        file_extension = os.path.splitext(excel_file.filename)[1].lower()
+        
+        # Validate file extension
+        if file_extension not in ['.xlsx', '.xls', '.csv']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format. Supported formats: .xlsx, .xls, .csv"
+            )
+
+        # Save the uploaded file temporarily with the correct extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
             # Write the uploaded file content to the temporary file
             content = await excel_file.read()
             temp_file.write(content)
@@ -263,14 +273,20 @@ async def process_excel_file(
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
 
-        # Process the Excel file
-        processor = AIProcessor(provider=provider if provider else "xai")
-        result = await processor.process_excel(temp_file_path, **kwargs)
-
-        # Clean up the temporary file
-        os.unlink(temp_file_path)
-
-        return result
+        try:
+            # Process the Excel file
+            processor = AIProcessor(provider=provider if provider else "xai")
+            result = await processor.process_excel(temp_file_path, **kwargs)
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing Excel file: {str(e)}"
+            )
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
