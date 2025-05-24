@@ -127,25 +127,58 @@ class GeminiProvider(BaseAIProvider):
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using Gemini"""
         try:
-            # Try to read the file as CSV first
+            # Check if required Excel engines are installed
             try:
-                df = pd.read_csv(file_path)
-            except Exception as csv_error:
-                # If CSV reading fails, try Excel engines
-                engines = ['openpyxl', 'xlrd']
-                df = None
-                last_error = None
+                import openpyxl
+                import xlrd
+            except ImportError as e:
+                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
+            # Try different methods to read the file
+            df = None
+            last_error = None
+
+            # First try to read as CSV with different encodings
+            encodings = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            # If CSV reading fails, try Excel engines
+            if df is None:
+                engines = ['openpyxl', 'xlrd']
                 for engine in engines:
                     try:
-                        df = pd.read_excel(file_path, engine=engine)
+                        # For xlrd engine, we need to specify the engine explicitly
+                        if engine == 'xlrd':
+                            df = pd.read_excel(file_path, engine=engine)
+                        else:
+                            # For openpyxl, try with default settings first
+                            try:
+                                df = pd.read_excel(file_path, engine=engine)
+                            except Exception:
+                                # If that fails, try with additional parameters
+                                df = pd.read_excel(
+                                    file_path,
+                                    engine=engine,
+                                    sheet_name=0,  # Read first sheet
+                                    header=None  # Don't assume header row
+                                )
                         break
                     except Exception as e:
                         last_error = e
                         continue
 
-                if df is None:
-                    raise Exception(f"Failed to read file with any method: {last_error}")
+            if df is None:
+                # Provide more detailed error information
+                error_msg = f"Failed to read file with any method. Last error: {str(last_error)}"
+                if "Excel xlsx file; not supported" in str(last_error):
+                    error_msg += "\nPlease ensure the file is a valid Excel file and not corrupted."
+                raise Exception(error_msg)
 
             # Clean the data by replacing special float values
             # First, replace infinity values with None
@@ -160,7 +193,6 @@ class GeminiProvider(BaseAIProvider):
 
             # Detect header row dynamically
             header_row = self._detect_header_row(df)
-
             if header_row is not None:
                 # Use this row as the header
                 df.columns = df.iloc[header_row]
