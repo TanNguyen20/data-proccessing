@@ -1,7 +1,6 @@
 # Multi-AI Provider Data Processing Project
 
-This project provides a flexible framework for processing data from various sources using multiple AI providers (OpenAI,
-Google Gemini, and xAI).
+This project provides a flexible framework for processing data from various sources using multiple AI providers (OpenAI, Google Gemini, and xAI). It includes a FastAPI-based API for easy integration and data processing capabilities.
 
 ## Features
 
@@ -9,24 +8,31 @@ Google Gemini, and xAI).
     - OpenAI
     - Google Gemini
     - xAI (Grok)
-- Data extraction from multiple sources:
+- Data extraction and processing from multiple sources:
     - Excel files (local and online)
     - Table images (OCR)
     - Facebook links
     - Google search results
     - PDF files
+- RESTful API endpoints for all processing capabilities
 - Streaming chat completions
 - Text embeddings
 - Image analysis
+- Table data extraction and processing
 
 ## Setup
 
 1. Clone the repository
-2. Install dependencies:
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Create a `.env` file with your API keys:
+4. Create a `.env` file with your API keys (use `.env.template` as reference):
    ```
    OPENAI_API_KEY=your_openai_key
    GEMINI_API_KEY=your_gemini_key
@@ -38,22 +44,37 @@ Google Gemini, and xAI).
 ```
 ├── src/
 │   ├── providers/        # AI provider implementations
-│   │   ├── base_provider.py
+│   │   ├── base_provider.py    # Abstract base class for providers
 │   │   ├── openai_provider.py
 │   │   ├── gemini_provider.py
-│   │   ├── xai_provider.py
+│   │   └── xai_provider.py
 │   ├── extractors/       # Data extraction modules
 │   │   └── excel_extractor.py
-│   ├── utils/            # Utility functions
-│   ├── config.py         # Configuration management
-│   └── main.py           # Main entry point
-├── requirements.txt      # Project dependencies
-└── .env.template         # Templete for environment variables 
+│   ├── utils/           # Utility functions
+│   ├── config.py        # Configuration management
+│   └── main.py          # Main entry point
+├── run_api.py           # FastAPI application entry point
+├── requirements.txt     # Project dependencies
+└── .env.template        # Template for environment variables
 ```
 
 ## Usage
 
-### Basic Usage
+### API Usage
+
+Start the API server:
+```bash
+python run_api.py
+```
+
+The API will be available at `http://localhost:8000` with the following endpoints:
+- `/process/text` - Process text data
+- `/process/image` - Process image data
+- `/process/excel` - Process Excel files
+- `/process/pdf` - Process PDF files
+- `/process/table` - Process table data
+
+### Python Library Usage
 
 ```python
 from src.main import AIProcessor
@@ -72,6 +93,10 @@ print(result)
 # Process text
 result = processor.process_text("Analyze this text")
 print(result)
+
+# Process PDF
+result = processor.process_pdf(pdf_file)
+print(result)
 ```
 
 ### Using Specific Providers
@@ -89,16 +114,26 @@ provider.initialize()
 result = provider.process_text("What is artificial intelligence?")
 print(result)
 
-# Streaming chat
-messages = [
-    {"role": "system", "content": "You are a helpful AI assistant."},
-    {"role": "user", "content": "Tell me about the history of AI."}
-]
-for line in provider.stream_chat(messages):
-    if line:
-        # Process streaming response
-        print(line.decode('utf-8'))
+# Get embeddings
+embeddings = provider.get_embedding("Sample text")
+print(embeddings)
+
+# Get available models
+models = provider.get_available_models()
+print(models)
 ```
+
+## Dependencies
+
+Key dependencies include:
+- `openai>=1.12.0` - OpenAI API client
+- `google-generativeai>=0.3.2` - Google Gemini API client
+- `pandas>=2.2.3` - Data manipulation
+- `fastapi>=0.110.0` - API framework
+- `pdfplumber>=0.10.3` - PDF processing
+- `pytesseract>=0.3.10` - OCR capabilities
+- `playwright>=1.52.0` - Web automation
+- And more (see requirements.txt for complete list)
 
 ## License
 
