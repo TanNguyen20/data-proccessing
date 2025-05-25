@@ -461,6 +461,89 @@ async def process_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/process-pdf-from-url")
+@handle_ai_errors
+async def process_pdf_from_url(
+        url: str = Query(..., description="URL of the PDF file to process"),
+        provider: str = Query("xai", description="AI provider to use"),
+        model: Optional[str] = None,
+        prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+        verify_ssl: bool = Query(True, description="Whether to verify SSL certificates")
+):
+    """
+    Process PDF file from URL with table data using AI and save results to MongoDB.
+    
+    Args:
+        url: URL of the PDF file to process
+        provider: The AI provider to use (xai, openai, gemini)
+        model: Optional specific model to use
+        prompt: Optional prompt to guide the analysis
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        verify_ssl: Whether to verify SSL certificates (default: True)
+        
+    Returns:
+        Dict containing:
+        - table_data: Structured table data from the PDF
+        - analysis: Overall analysis of the document
+        - page_count: Number of pages in the PDF
+        - row_count: Total number of rows extracted
+        - headers_by_page: Dictionary of headers found on each page
+        - source_url: Original URL of the PDF file
+        - collection_name: Name of the MongoDB collection where data is stored
+        - document_ids: List of IDs of the stored documents
+    """
+    try:
+        # Validate URL
+        if not url.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="URL must point to a PDF file")
+
+        processor = AIProcessor(provider=provider)
+        result = await processor.process_pdf_from_url(
+            url,
+            model=model,
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            verify_ssl=verify_ssl
+        )
+
+        # Generate collection name from URL
+        collection_name = await DatabaseNameGenerator.generate_table_name_from_url(
+            url,
+            db_type='mongodb',
+            max_length=30,
+            use_domain=True
+        )
+
+        # Create documents for each table row with metadata
+        documents = []
+        for row in result.get('table_data', []):
+            document = {
+                "url": url,
+                "processed_at": datetime.utcnow(),
+                "analysis": result.get('analysis'),
+                "page_count": result.get('page_count'),
+                "data": row
+            }
+            documents.append(document)
+
+        # Store all documents in MongoDB
+        doc_ids = insert_many_json_data(collection_name, documents)
+
+        # Add MongoDB info to the result
+        result.update({
+            "collection_name": collection_name,
+            "document_ids": doc_ids
+        })
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/extract-table-from-page")
 async def extract_table(request: URLRequest):
     try:

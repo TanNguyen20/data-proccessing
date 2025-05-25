@@ -80,3 +80,22 @@ class BaseAIProvider(ABC):
                 - headers_by_page: Dictionary of headers found on each page
         """
         pass
+
+    @abstractmethod
+    async def process_pdf_from_url(self, url: str, **kwargs) -> Dict[str, Any]:
+        """Process PDF file from URL using the AI provider
+        
+        Args:
+            url: URL of the PDF file to process
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - table_data: List of extracted and formatted table data
+                - analysis: Overall document analysis
+                - page_count: Number of pages in the PDF
+                - row_count: Total number of rows extracted
+                - headers_by_page: Dictionary of headers found on each page
+                - source_url: Original URL of the PDF file
+        """
+        pass

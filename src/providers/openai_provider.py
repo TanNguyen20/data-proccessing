@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import openai
 import pandas as pd
+import pdfplumber
 import requests
 from fastapi import UploadFile
+from urllib.parse import urlparse
 
 from .base_provider import BaseAIProvider
 from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL, OPENAI_VISION_MODEL, OPENAI_EMBEDDING_MODEL
@@ -918,3 +920,138 @@ class OpenAIProvider(BaseAIProvider):
             
         except Exception as e:
             raise Exception(f"Error generating text with OpenAI: {str(e)}")
+
+    async def process_pdf_from_url(self, url: str, **kwargs) -> Dict[str, Any]:
+        """Process PDF file from URL using OpenAI
+        
+        Args:
+            url: URL of the PDF file to process
+            **kwargs: Additional arguments like model, temperature, prompt etc.
+                - verify_ssl: Whether to verify SSL certificates (default: True)
+            
+        Returns:
+            Dict containing:
+                - table_data: List of extracted and formatted table data
+                - analysis: Overall document analysis
+                - page_count: Number of pages in the PDF
+                - row_count: Total number of rows extracted
+                - headers_by_page: Dictionary of headers found on each page
+                - source_url: Original URL of the PDF file
+        """
+        try:
+            # Validate URL
+            parsed_url = urlparse(url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError("Invalid URL provided")
+
+            # Get verify_ssl parameter with default True
+            verify_ssl = kwargs.get('verify_ssl', True)
+
+            # Download PDF with streaming
+            response = requests.get(url, stream=True, verify=verify_ssl)
+            response.raise_for_status()
+
+            # Check content type
+            content_type = response.headers.get('content-type', '').lower()
+            if 'application/pdf' not in content_type and not url.lower().endswith('.pdf'):
+                raise ValueError(f"URL does not point to a PDF file. Content-Type: {content_type}")
+
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                # Stream the content to the file
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        temp_file.write(chunk)
+                temp_file.flush()
+
+                # Read the PDF
+                with pdfplumber.open(temp_file.name) as pdf:
+                    # Extract text and tables
+                    text = ""
+                    tables = []
+                    headers_by_page = {}
+                    page_count = len(pdf.pages)
+                    row_count = 0
+
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        # Extract text
+                        page_text = page.extract_text() or ""
+                        text += f"\n--- Page {page_num} ---\n{page_text}"
+
+                        # Extract tables
+                        page_tables = page.extract_tables()
+                        if page_tables:
+                            for table in page_tables:
+                                if table and len(table) > 1:  # Ensure table has data
+                                    # Clean and format table data
+                                    cleaned_table = []
+                                    headers = []
+                                    for row in table:
+                                        # Clean each cell
+                                        cleaned_row = []
+                                        for cell in row:
+                                            if cell is not None:
+                                                # Convert to string and clean
+                                                cell_str = str(cell).strip()
+                                                # Remove special characters but keep Vietnamese
+                                                cell_str = re.sub(r'[^\w\s\u00C0-\u1EF9]', '', cell_str)
+                                                cleaned_row.append(cell_str)
+                                            else:
+                                                cleaned_row.append("")
+                                        
+                                        if cleaned_row and any(cleaned_row):  # Skip empty rows
+                                            if not headers:  # First non-empty row is headers
+                                                headers = cleaned_row
+                                                headers_by_page[page_num] = headers
+                                            else:
+                                                # Create row dict with headers
+                                                row_dict = dict(zip(headers, cleaned_row))
+                                                cleaned_table.append(row_dict)
+                                                row_count += 1
+                                    
+                                    if cleaned_table:
+                                        tables.extend(cleaned_table)
+
+                    # Generate analysis using OpenAI
+                    analysis_prompt = f"""Analyze this PDF document and provide a comprehensive summary:
+
+Document Content:
+{text}
+
+Please provide:
+1. A brief overview of the document
+2. Key points and important information
+3. Any notable patterns or trends in the data
+4. Recommendations or conclusions
+
+Format the response in a clear, structured way."""
+
+                    analysis = self.client.chat.completions.create(
+                        model=kwargs.get('model', 'gpt-3.5-turbo'),
+                        messages=[{"role": "user", "content": analysis_prompt}],
+                        temperature=kwargs.get('temperature', 0.7),
+                        max_tokens=kwargs.get('max_tokens', 1000)
+                    ).choices[0].message.content
+
+                    return {
+                        "table_data": tables,
+                        "analysis": analysis,
+                        "page_count": page_count,
+                        "row_count": row_count,
+                        "headers_by_page": headers_by_page,
+                        "source_url": url
+                    }
+
+        except requests.exceptions.SSLError as e:
+            raise Exception(f"SSL certificate verification failed. Try setting verify_ssl=False: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Error downloading PDF: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error processing PDF: {str(e)}")
+        finally:
+            # Clean up temporary file
+            if 'temp_file' in locals():
+                try:
+                    os.unlink(temp_file.name)
+                except:
+                    pass
