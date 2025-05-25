@@ -90,10 +90,6 @@ print(result)
 result = processor.process_image('path/to/image.jpg')
 print(result)
 
-# Process text
-result = processor.process_text("Analyze this text")
-print(result)
-
 # Process PDF
 result = processor.process_pdf(pdf_file)
 print(result)
@@ -109,10 +105,6 @@ from src.providers.xai_provider import XAIProvider
 # Initialize the provider
 provider = XAIProvider()
 provider.initialize()
-
-# Process text
-result = provider.process_text("What is artificial intelligence?")
-print(result)
 
 # Get embeddings
 embeddings = provider.get_embedding("Sample text")

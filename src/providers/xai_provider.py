@@ -32,83 +32,6 @@ class XAIProvider(BaseAIProvider):
         # No additional initialization needed as it's done in __init__
         pass
 
-    def process_text(self, text: str, **kwargs) -> str:
-        """Process text using xAI's text model"""
-        try:
-            messages = []
-            if kwargs.get('system_prompt'):
-                messages.append({"role": "system", "content": kwargs.get('system_prompt')})
-            messages.append({"role": "user", "content": text})
-
-            completion = self.client.chat.completions.create(
-                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
-                messages=messages,
-                temperature=kwargs.get('temperature', 0.7),
-                max_tokens=kwargs.get('max_tokens', 1000)
-            )
-            return completion.choices[0].message.content
-
-        except Exception as e:
-            raise Exception(f"Error processing text with xAI: {str(e)}")
-
-    def process_image(self, image_path: str, **kwargs) -> str:
-        """Process image using xAI's vision model"""
-        try:
-            # Read and encode image
-            with open(image_path, "rb") as image_file:
-                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": kwargs.get('prompt', "What's in this image?")},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
-                    ]
-                }
-            ]
-
-            completion = self.client.chat.completions.create(
-                model=kwargs.get('model', XAI_VISION_MODEL),
-                messages=messages,
-                temperature=kwargs.get('temperature', 0.7),
-                max_tokens=kwargs.get('max_tokens', 1000)
-            )
-            return completion.choices[0].message.content
-
-        except Exception as e:
-            raise Exception(f"Error processing image with xAI: {str(e)}")
-
-    def process_table(self, table_data: Any, **kwargs) -> Dict:
-        """Process table data using xAI"""
-        try:
-            # Convert table data to string representation
-            table_str = str(table_data)
-            prompt = kwargs.get('prompt', f"Analyze this table data and return a structured JSON response: {table_str}")
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-
-            completion = self.client.chat.completions.create(
-                model=kwargs.get('model') if kwargs.get('model') else XAI_DEFAULT_MODEL,
-                messages=messages,
-                temperature=kwargs.get('temperature', 0.7),
-                max_tokens=kwargs.get('max_tokens', 1000)
-            )
-            return {"analysis": completion.choices[0].message.content}
-
-        except Exception as e:
-            raise Exception(f"Error processing table with xAI: {str(e)}")
-
     def get_embedding(self, text: str) -> List[float]:
         """Get embeddings using xAI's embedding model"""
         try:
@@ -130,18 +53,6 @@ class XAIProvider(BaseAIProvider):
             "text-embedding-3-small",
             "text-embedding-3-large"
         ]
-
-    async def get_embeddings(self, text: str) -> List[float]:
-        """Get embeddings using xAI's embedding model"""
-        try:
-            response = self.client.embeddings.create(
-                model=XAI_EMBEDDING_MODEL,
-                input=text
-            )
-            return response.data[0].embedding
-
-        except Exception as e:
-            raise Exception(f"Error getting embeddings with xAI: {str(e)}")
 
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using xAI"""

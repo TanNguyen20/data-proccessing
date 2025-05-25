@@ -43,20 +43,6 @@ class AIProcessor:
         except Exception as e:
             raise Exception(f"Error processing Excel file: {str(e)}")
 
-    async def process_image(self, image_path: str, **kwargs) -> str:
-        """Process image using AI vision capabilities"""
-        try:
-            return await self.provider.process_image(image_path, **kwargs)
-        except Exception as e:
-            raise Exception(f"Error processing image: {str(e)}")
-
-    async def process_text(self, text: str, **kwargs) -> str:
-        """Process text using AI"""
-        try:
-            return await self.provider.process_text(text, **kwargs)
-        except Exception as e:
-            raise Exception(f"Error processing text: {str(e)}")
-
     async def process_pdf(self, pdf_file: UploadFile, **kwargs) -> Dict[str, Any]:
         """Process PDF file using AI
         

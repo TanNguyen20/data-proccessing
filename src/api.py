@@ -9,12 +9,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 
 from .main import AIProcessor
 from .utils.page_extractor import extract_table_as_json
-from .database import DatabaseNameGenerator, insert_json_data, insert_many_json_data
+from .database import DatabaseNameGenerator, insert_many_json_data
 
 # Configure logging
 logging.basicConfig(
@@ -133,68 +133,6 @@ async def get_providers():
         "providers": ["openai", "gemini", "xai"],
         "default": "xai"
     }
-
-
-@app.post("/process/text")
-@handle_ai_errors
-async def process_text(request: TextRequest, processor: AIProcessor = Depends(get_processor)):
-    result = processor.process_text(
-        request.text,
-        model=request.model,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens
-    )
-    return {"result": result}
-
-
-@app.post("/process/table")
-@handle_ai_errors
-async def process_table(request: TableDataRequest, processor: AIProcessor = Depends(get_processor)):
-    result = processor.process_table(
-        request.table_data,
-        model=request.model,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens
-    )
-    return {"result": result}
-
-
-@app.post("/process/image")
-@handle_ai_errors
-async def process_image(
-        file: UploadFile = File(...),
-        provider: str = Query("xai", description="AI provider to use"),
-        model: Optional[str] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 1000
-):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
-        content = await file.read()
-        temp_file.write(content)
-        temp_file_path = temp_file.name
-
-    try:
-        processor = AIProcessor(provider=provider)
-        result = processor.process_image(
-            temp_file_path,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        return {"result": result}
-    finally:
-        os.unlink(temp_file_path)
-
-
-@app.get("/embedding")
-@handle_ai_errors
-async def get_embedding(
-        text: str = Query(..., description="Text to get embedding for"),
-        provider: str = Query("xai", description="AI provider to use")
-):
-    processor = AIProcessor(provider=provider)
-    embedding = processor.get_embedding(text)
-    return {"embedding": embedding}
 
 
 @app.post("/process-excel-file")

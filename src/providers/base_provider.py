@@ -29,21 +29,6 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
-    def process_text(self, text: str, **kwargs) -> str:
-        """Process text using the AI provider"""
-        pass
-
-    @abstractmethod
-    def process_image(self, image_path: str, **kwargs) -> str:
-        """Process image using the AI provider"""
-        pass
-
-    @abstractmethod
-    def process_table(self, table_data: Any, **kwargs) -> Dict:
-        """Process table data using the AI provider"""
-        pass
-
-    @abstractmethod
     def get_embedding(self, text: str) -> list:
         """Get embeddings for the given text"""
         pass
