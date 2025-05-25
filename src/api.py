@@ -545,6 +545,65 @@ async def extract_table(request: URLRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/process-image")
+@handle_ai_errors
+async def process_image(
+        file: UploadFile = File(...),
+        provider: str = Query("xai", description="AI provider to use"),
+        model: Optional[str] = None,
+        prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000
+):
+    """
+    Process an image file using the specified AI provider.
+    
+    Args:
+        file: The image file to process
+        provider: The AI provider to use (xai, openai, gemini)
+        model: Optional model name to use
+        prompt: Optional prompt to guide the analysis
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        Dict containing:
+        - tables: List of detected tables with their coordinates and content
+        - text: Extracted text from the image
+        - analysis: Overall image analysis
+        - image_metadata: Basic metadata about the image (dimensions, format, etc.)
+    """
+    try:
+        # Validate file type
+        content_type = file.content_type
+        if not content_type or not content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only image files are supported."
+            )
+
+        # Prepare kwargs for the processor
+        kwargs = {
+            "model": model,
+            "prompt": prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+
+        # Process the image
+        processor = AIProcessor(provider=provider)
+        result = await processor.provider.process_image(file, **kwargs)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing image: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing image: {str(e)}"
+        )
+
+
 # Error handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

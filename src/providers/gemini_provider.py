@@ -917,3 +917,90 @@ Format the response in a clear, structured way."""
                     os.unlink(temp_file.name)
                 except:
                     pass
+
+    async def process_image(self, image_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process image file using Gemini
+        
+        Args:
+            image_file: The uploaded image file
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - tables: List of detected tables with their coordinates and content
+                - text: Extracted text from the image
+                - analysis: Overall image analysis
+                - image_metadata: Basic metadata about the image (dimensions, format, etc.)
+        """
+        try:
+            # Read image content
+            image_content = await image_file.read()
+            
+            # Get image metadata
+            from PIL import Image
+            import io
+            image = Image.open(io.BytesIO(image_content))
+            image_metadata = {
+                "format": image.format,
+                "mode": image.mode,
+                "width": image.width,
+                "height": image.height,
+                "size": len(image_content)
+            }
+
+            # Create the prompt for image analysis
+            prompt = """Analyze this image and:
+            1. Extract any text visible in the image
+            2. Identify and extract any tables, including their structure and content
+            3. Provide coordinates for any detected tables
+            4. Give a brief analysis of the image content
+            Format your response as a JSON object with the following structure:
+            {
+                "tables": [{"coordinates": [x1,y1,x2,y2], "content": [...]}],
+                "text": "extracted text",
+                "analysis": "brief analysis"
+            }"""
+
+            # Initialize the model
+            model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
+            model = genai.GenerativeModel(model_name)
+
+            # Create the image part
+            image_part = {
+                "mime_type": f"image/{image.format.lower()}",
+                "data": image_content
+            }
+
+            # Generate content with the image
+            response = model.generate_content(
+                [prompt, image_part],
+                generation_config=genai.types.GenerationConfig(
+                    temperature=kwargs.get('temperature', 0.2),
+                    max_output_tokens=kwargs.get('max_tokens', 2000)
+                )
+            )
+
+            # Parse the response
+            try:
+                result = json.loads(response.text)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract JSON from the text
+                import re
+                json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                else:
+                    # If no JSON found, create a basic structure
+                    result = {
+                        "tables": [],
+                        "text": response.text,
+                        "analysis": "Could not parse structured data from response"
+                    }
+
+            # Add image metadata to the result
+            result["image_metadata"] = image_metadata
+
+            return result
+
+        except Exception as e:
+            raise Exception(f"Error processing image with Gemini: {str(e)}")

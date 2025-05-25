@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import tempfile
@@ -967,3 +968,97 @@ Format the response in a clear, structured way."""
                     os.unlink(temp_file.name)
                 except:
                     pass
+
+    async def process_image(self, image_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process image file using OpenAI
+        
+        Args:
+            image_file: The uploaded image file
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - tables: List of detected tables with their coordinates and content
+                - text: Extracted text from the image
+                - analysis: Overall image analysis
+                - image_metadata: Basic metadata about the image (dimensions, format, etc.)
+        """
+        try:
+            # Read image content
+            image_content = await image_file.read()
+            
+            # Get image metadata
+            from PIL import Image
+            import io
+            image = Image.open(io.BytesIO(image_content))
+            image_metadata = {
+                "format": image.format,
+                "mode": image.mode,
+                "width": image.width,
+                "height": image.height,
+                "size": len(image_content)
+            }
+
+            # Convert image to base64 for API
+            import base64
+            base64_image = base64.b64encode(image_content).decode('utf-8')
+
+            # Create the prompt for image analysis
+            system_prompt = """You are an image analysis expert. Analyze the provided image and:
+            1. Extract any text visible in the image
+            2. Identify and extract any tables, including their structure and content
+            3. Provide coordinates for any detected tables
+            4. Give a brief analysis of the image content
+            Format your response as a JSON object with the following structure:
+            {
+                "tables": [{"coordinates": [x1,y1,x2,y2], "content": [...]}],
+                "text": "extracted text",
+                "analysis": "brief analysis"
+            }"""
+
+            # Call the API with the image
+            response = self.client.chat.completions.create(
+                model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Please analyze this image and extract all information."},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/{image.format.lower()};base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                temperature=kwargs.get('temperature', 0.2),
+                max_tokens=kwargs.get('max_tokens', 2000)
+            )
+
+            # Parse the response
+            try:
+                result = json.loads(response.choices[0].message.content)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract JSON from the text
+                import re
+                json_match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                else:
+                    # If no JSON found, create a basic structure
+                    result = {
+                        "tables": [],
+                        "text": response.choices[0].message.content,
+                        "analysis": "Could not parse structured data from response"
+                    }
+
+            # Add image metadata to the result
+            result["image_metadata"] = image_metadata
+
+            return result
+
+        except Exception as e:
+            raise Exception(f"Error processing image with OpenAI: {str(e)}")

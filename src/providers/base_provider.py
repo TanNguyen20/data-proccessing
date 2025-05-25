@@ -87,3 +87,20 @@ class BaseAIProvider(ABC):
                 - source_url: Original URL of the PDF file
         """
         pass
+
+    @abstractmethod
+    async def process_image(self, image_file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process image file using the AI provider
+        
+        Args:
+            image_file: The uploaded image file
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - tables: List of detected tables with their coordinates and content
+                - text: Extracted text from the image
+                - analysis: Overall image analysis
+                - image_metadata: Basic metadata about the image (dimensions, format, etc.)
+        """
+        pass
