@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 import google.generativeai as genai
 import numpy as np
@@ -10,10 +11,9 @@ import pandas as pd
 import pdfplumber
 import requests
 from fastapi import UploadFile
-from urllib.parse import urlparse
 
 from .base_provider import BaseAIProvider
-from ..config import GEMINI_API_KEY, GEMINI_DEFAULT_MODEL, GEMINI_VISION_MODEL, GEMINI_EMBEDDING_MODEL
+from ..config import GEMINI_API_KEY, GEMINI_DEFAULT_MODEL
 
 
 class GeminiProvider(BaseAIProvider):
@@ -29,25 +29,22 @@ class GeminiProvider(BaseAIProvider):
             raise ValueError("Gemini API key not found in environment variables")
         genai.configure(api_key=GEMINI_API_KEY)
 
-
     def get_available_models(self) -> List[str]:
-        """Get list of available Gemini models"""
-        # Based on the documentation, these are the available models
-        return [
-            "gemini-pro",
-            "gemini-pro-vision",
-            "embedding-001"
-        ]
-
-    async def get_embeddings(self, text: str) -> List[float]:
-        """Get embeddings using Gemini's embedding model"""
+        """Get list of available Gemini models by calling the Google Generative AI API
+        
+        Returns:
+            List[str]: List of available model names from Google's Generative AI API
+            
+        Raises:
+            Exception: If there's an error fetching models from Google's API
+        """
         try:
-            model = genai.GenerativeModel(GEMINI_EMBEDDING_MODEL)
-            response = model.embed_content(text)
-            return response.embedding
+            # Fetch models from Google's Generative AI API
+            models = genai.list_models()
+            return [model.name for model in models]
 
         except Exception as e:
-            raise Exception(f"Error getting embeddings with Gemini: {str(e)}")
+            raise Exception(f"Error fetching available models from Google's Generative AI API: {str(e)}")
 
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using Gemini"""
@@ -57,7 +54,8 @@ class GeminiProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Try different methods to read the file
             df = None
@@ -169,7 +167,8 @@ class GeminiProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
@@ -766,7 +765,7 @@ class GeminiProvider(BaseAIProvider):
         try:
             model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
             model = genai.GenerativeModel(model_name)
-            
+
             response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
@@ -775,7 +774,7 @@ class GeminiProvider(BaseAIProvider):
                 )
             )
             return response.text
-            
+
         except Exception as e:
             raise Exception(f"Error generating text with Gemini: {str(e)}")
 
@@ -856,7 +855,7 @@ class GeminiProvider(BaseAIProvider):
                                                 cleaned_row.append(cell_str)
                                             else:
                                                 cleaned_row.append("")
-                                        
+
                                         if cleaned_row and any(cleaned_row):  # Skip empty rows
                                             if not headers:  # First non-empty row is headers
                                                 headers = cleaned_row
@@ -866,7 +865,7 @@ class GeminiProvider(BaseAIProvider):
                                                 row_dict = dict(zip(headers, cleaned_row))
                                                 cleaned_table.append(row_dict)
                                                 row_count += 1
-                                    
+
                                     if cleaned_table:
                                         tables.extend(cleaned_table)
 
@@ -874,7 +873,7 @@ class GeminiProvider(BaseAIProvider):
                     model = genai.GenerativeModel(
                         model_name=kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
                     )
-                    
+
                     prompt = f"""Analyze this PDF document and provide a comprehensive summary:
 
 Document Content:

@@ -2,19 +2,19 @@ import logging
 import os
 import tempfile
 import traceback
+from datetime import datetime
 from functools import wraps
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 
+from .database import DatabaseNameGenerator, insert_many_json_data
 from .main import AIProcessor
 from .utils.page_extractor import extract_table_as_json
-from .database import DatabaseNameGenerator, insert_many_json_data
 
 # Configure logging
 logging.basicConfig(
@@ -135,6 +135,33 @@ async def get_providers():
     }
 
 
+@app.get("/models/{provider}")
+@handle_ai_errors
+async def get_models(provider: str):
+    """
+    Get list of available models for a specific provider.
+    
+    Args:
+        provider: The AI provider to get models from (openai, gemini, xai)
+        
+    Returns:
+        Dict containing:
+        - models: List of available models for the provider
+        - provider: The provider name
+    """
+    try:
+        processor = AIProcessor(provider=provider)
+        models = processor.provider.get_available_models()
+        return {
+            "provider": provider,
+            "models": models
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/process-excel-file")
 @handle_ai_errors
 async def process_excel_file(
@@ -164,7 +191,7 @@ async def process_excel_file(
     try:
         # Get the file extension from the original filename
         file_extension = os.path.splitext(excel_file.filename)[1].lower()
-        
+
         # Validate file extension
         if file_extension not in ['.xlsx', '.xls', '.csv']:
             raise HTTPException(
@@ -261,7 +288,7 @@ async def process_excel_url(request: ExcelUrlRequest):
     try:
         # Get the file extension from the URL
         file_extension = os.path.splitext(str(request.excel_url))[1].lower()
-        
+
         # Validate file extension for direct Excel URLs
         if not str(request.excel_url).startswith(('https://docs.google.com/spreadsheets')):
             if file_extension not in ['.xlsx', '.xls', '.csv']:
@@ -487,7 +514,7 @@ async def extract_table(request: URLRequest):
     try:
         # Extract table data
         table_data = await extract_table_as_json(request.url)
-        
+
         # Generate collection name from URL
         collection_name = await DatabaseNameGenerator.generate_table_name_from_url(
             request.url,
@@ -495,7 +522,7 @@ async def extract_table(request: URLRequest):
             max_length=30,
             use_domain=True
         )
-        
+
         # Create a document for each row with metadata
         documents = []
         for row in table_data:
@@ -505,10 +532,10 @@ async def extract_table(request: URLRequest):
                 "data": row
             }
             documents.append(document)
-        
+
         # Store all documents in MongoDB
         doc_ids = insert_many_json_data(collection_name, documents)
-        
+
         return {
             "data": table_data,
             "collection_name": collection_name,

@@ -29,13 +29,16 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
-    def get_embedding(self, text: str) -> list:
-        """Get embeddings for the given text"""
-        pass
-
-    @abstractmethod
     def get_available_models(self) -> list:
-        """Get list of available models for the provider"""
+        """Get list of available models for the provider
+        
+        Returns:
+            list: List of model names available for use with this provider.
+                 Each provider implementation should return its specific list of models:
+                 - OpenAI: List of available models from OpenAI API
+                 - Gemini: List of available Gemini models
+                 - xAI: List of available xAI models
+        """
         pass
 
     @abstractmethod

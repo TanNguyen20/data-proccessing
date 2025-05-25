@@ -1,9 +1,9 @@
-import base64
 import json
 import os
 import re
 import tempfile
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -11,10 +11,9 @@ import pdfplumber
 import requests
 from fastapi import UploadFile
 from openai import OpenAI
-from urllib.parse import urlparse
 
 from .base_provider import BaseAIProvider
-from ..config import XAI_API_KEY, XAI_BASE_URL, XAI_DEFAULT_MODEL, XAI_VISION_MODEL, XAI_EMBEDDING_MODEL
+from ..config import XAI_API_KEY, XAI_BASE_URL, XAI_DEFAULT_MODEL
 
 
 class XAIProvider(BaseAIProvider):
@@ -32,27 +31,22 @@ class XAIProvider(BaseAIProvider):
         # No additional initialization needed as it's done in __init__
         pass
 
-    def get_embedding(self, text: str) -> List[float]:
-        """Get embeddings using xAI's embedding model"""
+    def get_available_models(self) -> List[str]:
+        """Get list of available xAI models by calling the xAI API
+        
+        Returns:
+            List[str]: List of available model names from xAI API
+            
+        Raises:
+            Exception: If there's an error fetching models from xAI API
+        """
         try:
-            response = self.client.embeddings.create(
-                model=XAI_EMBEDDING_MODEL,
-                input=text
-            )
-            return response.data[0].embedding
+            # Fetch models from xAI API
+            models = self.client.models.list()
+            return [model.id for model in models.data]
 
         except Exception as e:
-            raise Exception(f"Error getting embeddings with xAI: {str(e)}")
-
-    def get_available_models(self) -> List[str]:
-        """Get list of available xAI models"""
-        # Based on the documentation, these are the available models
-        return [
-            "grok-1",
-            "grok-1-vision",
-            "text-embedding-3-small",
-            "text-embedding-3-large"
-        ]
+            raise Exception(f"Error fetching available models from xAI API: {str(e)}")
 
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using xAI"""
@@ -62,7 +56,8 @@ class XAIProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Try different methods to read the file
             df = None
@@ -176,7 +171,8 @@ class XAIProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
@@ -536,7 +532,7 @@ class XAIProvider(BaseAIProvider):
                                                 cleaned_row.append(cell_str)
                                             else:
                                                 cleaned_row.append("")
-                                        
+
                                         if cleaned_row and any(cleaned_row):  # Skip empty rows
                                             if not headers:  # First non-empty row is headers
                                                 headers = cleaned_row
@@ -546,7 +542,7 @@ class XAIProvider(BaseAIProvider):
                                                 row_dict = dict(zip(headers, cleaned_row))
                                                 cleaned_table.append(row_dict)
                                                 row_count += 1
-                                    
+
                                     if cleaned_table:
                                         tables.extend(cleaned_table)
 
@@ -1003,7 +999,7 @@ Format the response in a clear, structured way."""
         """
         try:
             messages = [{"role": "user", "content": prompt}]
-            
+
             completion = self.client.chat.completions.create(
                 model=kwargs.get('model', XAI_DEFAULT_MODEL),
                 messages=messages,
@@ -1011,6 +1007,6 @@ Format the response in a clear, structured way."""
                 max_tokens=kwargs.get('max_tokens', 1000)
             )
             return completion.choices[0].message.content
-            
+
         except Exception as e:
             raise Exception(f"Error generating text with xAI: {str(e)}")

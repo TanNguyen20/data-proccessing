@@ -1,8 +1,8 @@
-import base64
 import os
 import re
 import tempfile
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 import numpy as np
 import openai
@@ -10,10 +10,9 @@ import pandas as pd
 import pdfplumber
 import requests
 from fastapi import UploadFile
-from urllib.parse import urlparse
 
 from .base_provider import BaseAIProvider
-from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL, OPENAI_VISION_MODEL, OPENAI_EMBEDDING_MODEL
+from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL
 
 
 class OpenAIProvider(BaseAIProvider):
@@ -31,23 +30,22 @@ class OpenAIProvider(BaseAIProvider):
             raise ValueError("OpenAI API key not found in environment variables")
         self.available_models = self.get_available_models()
 
-    def get_embedding(self, text: str) -> List[float]:
-        """Get embeddings using OpenAI's embedding model"""
+    def get_available_models(self) -> List[str]:
+        """Get list of available OpenAI models by calling the OpenAI API
+        
+        Returns:
+            List[str]: List of available model names from OpenAI API
+            
+        Raises:
+            Exception: If there's an error fetching models from OpenAI API
+        """
         try:
-            response = self.client.embeddings.create(
-                model=OPENAI_EMBEDDING_MODEL,
-                input=text
-            )
-            return response.data[0].embedding
+            # Fetch models from OpenAI API
+            models = self.client.models.list()
+            return [model.id for model in models.data]
 
         except Exception as e:
-            raise Exception(f"Error getting embeddings with OpenAI: {str(e)}")
-
-    def get_available_models(self) -> List[str]:
-        """Get list of available OpenAI models"""
-        models = self.client.models.list()
-        return [model.id for model in models.data]
-
+            raise Exception(f"Error fetching available models from OpenAI API: {str(e)}")
 
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using OpenAI"""
@@ -57,7 +55,8 @@ class OpenAIProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Try different methods to read the file
             df = None
@@ -170,7 +169,8 @@ class OpenAIProvider(BaseAIProvider):
                 import openpyxl
                 import xlrd
             except ImportError as e:
-                raise Exception(f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
+                raise Exception(
+                    f"Required Excel engine not installed: {str(e)}. Please install openpyxl and xlrd packages.")
 
             # Check if the URL is a Google Sheets URL
             if "docs.google.com/spreadsheets" in url:
@@ -821,7 +821,7 @@ class OpenAIProvider(BaseAIProvider):
         """
         try:
             messages = [{"role": "user", "content": prompt}]
-            
+
             completion = self.client.chat.completions.create(
                 model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
                 messages=messages,
@@ -829,7 +829,7 @@ class OpenAIProvider(BaseAIProvider):
                 max_tokens=kwargs.get('max_tokens', 1000)
             )
             return completion.choices[0].message.content
-            
+
         except Exception as e:
             raise Exception(f"Error generating text with OpenAI: {str(e)}")
 
@@ -910,7 +910,7 @@ class OpenAIProvider(BaseAIProvider):
                                                 cleaned_row.append(cell_str)
                                             else:
                                                 cleaned_row.append("")
-                                        
+
                                         if cleaned_row and any(cleaned_row):  # Skip empty rows
                                             if not headers:  # First non-empty row is headers
                                                 headers = cleaned_row
@@ -920,7 +920,7 @@ class OpenAIProvider(BaseAIProvider):
                                                 row_dict = dict(zip(headers, cleaned_row))
                                                 cleaned_table.append(row_dict)
                                                 row_count += 1
-                                    
+
                                     if cleaned_table:
                                         tables.extend(cleaned_table)
 

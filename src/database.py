@@ -1,9 +1,10 @@
-from pymongo import MongoClient
-from typing import Dict, Any, Optional, List, Union
 import os
-from dotenv import load_dotenv
+from typing import Dict, Any, Optional, List
 from urllib.parse import urlparse, unquote
+
+from dotenv import load_dotenv
 from fastapi import UploadFile
+from pymongo import MongoClient
 
 from src.providers.base_provider import BaseAIProvider
 from src.providers.gemini_provider import GeminiProvider
@@ -16,6 +17,7 @@ load_dotenv()
 # MongoDB connection string from environment variable
 MONGODB_URI = os.getenv('MONGODB_URI')
 
+
 def get_mongodb_client() -> MongoClient:
     """
     Create and return a MongoDB client instance
@@ -23,6 +25,7 @@ def get_mongodb_client() -> MongoClient:
     if not MONGODB_URI:
         raise ValueError("MongoDB URI not found in environment variables")
     return MongoClient(MONGODB_URI)
+
 
 def get_ai_provider(provider_name: str = None) -> BaseAIProvider:
     """
@@ -35,21 +38,22 @@ def get_ai_provider(provider_name: str = None) -> BaseAIProvider:
         BaseProvider: Instance of the selected AI provider
     """
     provider_name = provider_name or os.getenv('DEFAULT_PROVIDER', 'xai').lower()
-    
+
     providers = {
         'openai': OpenAIProvider,
         'gemini': GeminiProvider,
         'xai': XAIProvider
     }
-    
+
     if provider_name not in providers:
         raise ValueError(f"Unsupported provider: {provider_name}")
-        
+
     return providers[provider_name]()
+
 
 class DatabaseNameGenerator:
     """Class to handle database table/collection name generation"""
-    
+
     @staticmethod
     def clean_name(name: str, max_length: int = 30) -> str:
         """
@@ -64,19 +68,19 @@ class DatabaseNameGenerator:
         """
         # Convert to lowercase
         name = name.strip().lower()
-        
+
         # Replace spaces and special characters with underscores
         name = ''.join(c if c.isalnum() or c == '_' else '_' for c in name)
-        
+
         # Remove consecutive underscores
         name = '_'.join(filter(None, name.split('_')))
-        
+
         # Ensure the name is not too long
         if len(name) > max_length:
             name = name[:max_length].rstrip('_')
-            
+
         return name
-    
+
     @staticmethod
     def extract_url_components(url: str) -> Dict[str, str]:
         """
@@ -91,20 +95,20 @@ class DatabaseNameGenerator:
         try:
             # Parse the URL
             parsed = urlparse(url)
-            
+
             # Decode URL-encoded components
             path = unquote(parsed.path)
             query = unquote(parsed.query)
-            
+
             # Split path into segments
             path_segments = [seg for seg in path.split('/') if seg]
-            
+
             # Get the last meaningful segment (usually the most specific)
             last_segment = path_segments[-1] if path_segments else ''
-            
+
             # Remove file extension if present
             last_segment = os.path.splitext(last_segment)[0]
-            
+
             return {
                 'domain': parsed.netloc,
                 'path': path,
@@ -113,14 +117,14 @@ class DatabaseNameGenerator:
             }
         except Exception as e:
             raise Exception(f"Error parsing URL: {str(e)}")
-    
+
     @staticmethod
     async def generate_table_name_from_url(
-        url: str,
-        provider_name: Optional[str] = None,
-        db_type: str = 'generic',
-        max_length: int = 30,
-        use_domain: bool = False
+            url: str,
+            provider_name: Optional[str] = None,
+            db_type: str = 'generic',
+            max_length: int = 30,
+            use_domain: bool = False
     ) -> str:
         """
         Generate a database table/collection name based on URL
@@ -138,10 +142,10 @@ class DatabaseNameGenerator:
         try:
             # Extract URL components
             url_components = DatabaseNameGenerator.extract_url_components(url)
-            
+
             # Get AI provider
             provider = get_ai_provider(provider_name)
-            
+
             # Create database-specific prompt
             db_specific_rules = {
                 'mongodb': """
@@ -169,9 +173,9 @@ class DatabaseNameGenerator:
                 - Be descriptive but concise
                 """
             }
-            
+
             db_rules = db_specific_rules.get(db_type.lower(), db_specific_rules['generic'])
-            
+
             # Create prompt for name generation
             prompt = f"""Based on the following URL components, generate a suitable database {db_type} table/collection name.
             The name should be:
@@ -187,30 +191,30 @@ class DatabaseNameGenerator:
             Query: {url_components['query']}
             
             Return ONLY the name, nothing else."""
-            
+
             # Get AI response
             response = await provider.generate_text(prompt)
-            
+
             # Clean and validate the name
             name = DatabaseNameGenerator.clean_name(response, max_length)
-            
+
             # Add domain prefix if requested
             if use_domain and url_components['domain']:
                 domain_prefix = DatabaseNameGenerator.clean_name(url_components['domain'].split('.')[0])
                 name = f"{domain_prefix}_{name}"
-            
+
             return name
-            
+
         except Exception as e:
             raise Exception(f"Error generating database name from URL: {str(e)}")
-    
+
     @staticmethod
     async def generate_table_names_from_urls(
-        urls: List[str],
-        provider_name: Optional[str] = None,
-        db_type: str = 'generic',
-        max_length: int = 30,
-        use_domain: bool = False
+            urls: List[str],
+            provider_name: Optional[str] = None,
+            db_type: str = 'generic',
+            max_length: int = 30,
+            use_domain: bool = False
     ) -> List[str]:
         """
         Generate multiple database table/collection names based on URLs
@@ -239,10 +243,10 @@ class DatabaseNameGenerator:
 
     @staticmethod
     async def generate_table_name_from_file_content(
-        file: UploadFile,
-        provider_name: Optional[str] = None,
-        db_type: str = 'generic',
-        max_length: int = 30
+            file: UploadFile,
+            provider_name: Optional[str] = None,
+            db_type: str = 'generic',
+            max_length: int = 30
     ) -> str:
         """
         Generate a database table/collection name based on file content using AI
@@ -263,10 +267,10 @@ class DatabaseNameGenerator:
             # Read file content
             content = await file.read()
             file_content = content.decode('utf-8')
-            
+
             # Get AI provider
             provider = get_ai_provider(provider_name)
-            
+
             # Create database-specific prompt
             db_specific_rules = {
                 'mongodb': """
@@ -294,9 +298,9 @@ class DatabaseNameGenerator:
                 - Be descriptive but concise
                 """
             }
-            
+
             db_rules = db_specific_rules.get(db_type.lower(), db_specific_rules['generic'])
-            
+
             # Create prompt for name generation
             prompt = f"""Based on the following file content from {file.filename}, generate a suitable database {db_type} table/collection name.
             The name should be:
@@ -309,25 +313,25 @@ class DatabaseNameGenerator:
             {file_content[:1000]}  # Limit content to first 1000 chars to avoid token limits
             
             Return ONLY the name, nothing else."""
-            
+
             # Get AI response
             response = await provider.generate_text(prompt)
-            
+
             # Clean and validate the name
             return DatabaseNameGenerator.clean_name(response, max_length)
-            
+
         except Exception as e:
             raise Exception(f"Error generating database name from file: {str(e)}")
         finally:
             # Reset file pointer
             await file.seek(0)
-    
+
     @staticmethod
     async def generate_table_names_from_file_contents(
-        files: List[UploadFile],
-        provider_name: Optional[str] = None,
-        db_type: str = 'generic',
-        max_length: int = 30
+            files: List[UploadFile],
+            provider_name: Optional[str] = None,
+            db_type: str = 'generic',
+            max_length: int = 30
     ) -> List[str]:
         """
         Generate multiple database table/collection names based on file contents
@@ -362,6 +366,7 @@ class DatabaseNameGenerator:
             for file in files:
                 await file.seek(0)
 
+
 def insert_json_data(collection_name: str, json_data: Dict[str, Any]) -> str:
     """
     Insert JSON data into specified MongoDB collection
@@ -376,21 +381,22 @@ def insert_json_data(collection_name: str, json_data: Dict[str, Any]) -> str:
     try:
         # Get MongoDB client
         client = get_mongodb_client()
-        
+
         # Get database and collection
         db = client.get_database()
         collection = db[collection_name]
-        
+
         # Insert the document
         result = collection.insert_one(json_data)
-        
+
         # Close the connection
         client.close()
-        
+
         return str(result.inserted_id)
-        
+
     except Exception as e:
         raise Exception(f"Error inserting data into MongoDB: {str(e)}")
+
 
 def insert_many_json_data(collection_name: str, json_data_list: list[Dict[str, Any]]) -> list[str]:
     """
@@ -406,18 +412,18 @@ def insert_many_json_data(collection_name: str, json_data_list: list[Dict[str, A
     try:
         # Get MongoDB client
         client = get_mongodb_client()
-        
+
         # Get database and collection
         db = client.get_database()
         collection = db[collection_name]
-        
+
         # Insert the documents
         result = collection.insert_many(json_data_list)
-        
+
         # Close the connection
         client.close()
-        
+
         return [str(id) for id in result.inserted_ids]
-        
+
     except Exception as e:
-        raise Exception(f"Error inserting data into MongoDB: {str(e)}") 
+        raise Exception(f"Error inserting data into MongoDB: {str(e)}")

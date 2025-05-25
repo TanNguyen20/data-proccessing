@@ -114,6 +114,17 @@ class AIProcessor:
         except Exception as e:
             raise Exception(f"Error processing Excel URL: {str(e)}")
 
+    def get_available_models(self) -> list:
+        """Get list of available models for the current provider
+        
+        Returns:
+            list: List of available model names for the current provider
+        """
+        try:
+            return self.provider.get_available_models()
+        except Exception as e:
+            raise Exception(f"Error getting available models: {str(e)}")
+
 
 # Initialize the AI processor
 processor = AIProcessor()

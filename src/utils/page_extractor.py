@@ -1,6 +1,5 @@
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-from playwright.async_api import async_playwright
 
 
 async def extract_table_as_json(url):
