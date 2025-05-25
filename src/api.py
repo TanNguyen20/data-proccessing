@@ -207,7 +207,7 @@ async def process_excel_file(
         max_tokens: Optional[int] = 1000
 ):
     """
-    Process an Excel file uploaded by the user.
+    Process an Excel file uploaded by the user and save results to MongoDB.
     
     Args:
         excel_file: The Excel file to process
@@ -217,7 +217,11 @@ async def process_excel_file(
         max_tokens: Maximum number of tokens to generate
         
     Returns:
-        The processed Excel data and analysis
+        Dict containing:
+        - processed_data: The processed Excel data
+        - analysis: Overall analysis of the data
+        - collection_name: Name of the MongoDB collection where data is stored
+        - document_ids: List of IDs of the stored documents
     """
     try:
         # Get the file extension from the original filename
@@ -252,6 +256,34 @@ async def process_excel_file(
             # Process the Excel file
             processor = AIProcessor(provider=provider if provider else "xai")
             result = await processor.process_excel(temp_file_path, **kwargs)
+
+            # Generate collection name from filename
+            collection_name = await DatabaseNameGenerator.generate_table_name_from_file_content(
+                excel_file,
+                db_type='mongodb',
+                max_length=30
+            )
+
+            # Create documents for each row with metadata
+            documents = []
+            for row in result.get('data', []):
+                document = {
+                    "filename": excel_file.filename,
+                    "processed_at": datetime.utcnow(),
+                    "analysis": result.get('analysis'),
+                    "data": row
+                }
+                documents.append(document)
+
+            # Store all documents in MongoDB
+            doc_ids = insert_many_json_data(collection_name, documents)
+
+            # Add MongoDB info to the result
+            result.update({
+                "collection_name": collection_name,
+                "document_ids": doc_ids
+            })
+
             return result
         except Exception as e:
             raise HTTPException(
@@ -270,7 +302,7 @@ async def process_excel_file(
 @handle_ai_errors
 async def process_excel_url(request: ExcelUrlRequest):
     """
-    Process an Excel file from a URL.
+    Process an Excel file from a URL and save results to MongoDB.
     
     Args:
         request: The request containing:
@@ -282,7 +314,11 @@ async def process_excel_url(request: ExcelUrlRequest):
             - max_tokens: Maximum number of tokens to generate
         
     Returns:
-        The processed Excel data and analysis
+        Dict containing:
+        - data: The processed Excel data
+        - analysis: Overall analysis of the data
+        - collection_name: Name of the MongoDB collection where data is stored
+        - document_ids: List of IDs of the stored documents
     """
     try:
         # Get the file extension from the URL
@@ -313,6 +349,35 @@ async def process_excel_url(request: ExcelUrlRequest):
             str(request.excel_url),
             **kwargs
         )
+
+        # Generate collection name from URL
+        collection_name = await DatabaseNameGenerator.generate_table_name_from_url(
+            str(request.excel_url),
+            db_type='mongodb',
+            max_length=30,
+            use_domain=True
+        )
+
+        # Create documents for each row with metadata
+        documents = []
+        for row in result.get('data', []):
+            document = {
+                "url": str(request.excel_url),
+                "processed_at": datetime.utcnow(),
+                "analysis": result.get('analysis'),
+                "data": row
+            }
+            documents.append(document)
+
+        # Store all documents in MongoDB
+        doc_ids = insert_many_json_data(collection_name, documents)
+
+        # Add MongoDB info to the result
+        result.update({
+            "collection_name": collection_name,
+            "document_ids": doc_ids
+        })
+
         return result
     except Exception as e:
         raise HTTPException(
