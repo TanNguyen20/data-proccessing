@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import tempfile
@@ -11,10 +12,12 @@ import pandas as pd
 import pdfplumber
 import requests
 from fastapi import UploadFile
+import base64
 
 from .base_provider import BaseAIProvider
 from ..config import GEMINI_API_KEY, GEMINI_DEFAULT_MODEL
 
+logger = logging.getLogger(__name__)
 
 class GeminiProvider(BaseAIProvider):
     """Gemini Provider implementation using Google's Generative AI"""
@@ -25,26 +28,35 @@ class GeminiProvider(BaseAIProvider):
 
     def initialize(self) -> None:
         """Initialize Gemini client"""
-        if not GEMINI_API_KEY:
-            raise ValueError("Gemini API key not found in environment variables")
-        genai.configure(api_key=GEMINI_API_KEY)
+        try:
+            if not GEMINI_API_KEY:
+                raise ValueError("Gemini API key not found in environment variables")
+
+            # Configure the Gemini API
+            genai.configure(api_key=GEMINI_API_KEY)
+            
+            # Initialize the model
+            self.client = genai.GenerativeModel('gemini-pro')
+            
+        except Exception as e:
+            raise Exception(f"Error initializing Gemini client: {str(e)}")
 
     def get_available_models(self) -> List[str]:
-        """Get list of available Gemini models by calling the Google Generative AI API
+        """Get list of available Gemini models
         
         Returns:
-            List[str]: List of available model names from Google's Generative AI API
+            List[str]: List of available model names from Gemini API
             
         Raises:
-            Exception: If there's an error fetching models from Google's API
+            Exception: If there's an error fetching models from Gemini API
         """
         try:
-            # Fetch models from Google's Generative AI API
+            # Get available models
             models = genai.list_models()
-            return [model.name for model in models]
+            return [model.name for model in models if 'gemini' in model.name.lower()]
 
         except Exception as e:
-            raise Exception(f"Error fetching available models from Google's Generative AI API: {str(e)}")
+            raise Exception(f"Error fetching available models from Gemini API: {str(e)}")
 
     async def process_excel(self, file_path: str, prompt: str = None, **kwargs) -> Dict[str, Any]:
         """Process Excel file using Gemini"""
@@ -1004,3 +1016,96 @@ Format the response in a clear, structured way."""
 
         except Exception as e:
             raise Exception(f"Error processing image with Gemini: {str(e)}")
+
+    async def process_table_by_ai(self, file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process any file using AI to extract table data.
+        
+        Args:
+            file: The file to process (supports any file type)
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - table_data: Extracted table data as JSON array
+                - analysis: Overall analysis of the document
+        """
+        temp_file_path = None
+        try:
+            # Save file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
+                content = await file.read()
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+
+            # Read file content for Gemini
+            with open(temp_file_path, "rb") as file_to_upload:
+                file_content = file_to_upload.read()
+                
+                # Create the prompt for table extraction
+                prompt = """Please analyze this file and extract any tables present in it.
+                For each table found:
+                1. Identify the headers
+                2. Extract the data rows
+                3. Format the data as a JSON array
+                4. Provide a brief analysis of the table content
+                
+                Return ONLY a valid JSON object in this exact format:
+                {
+                    "tables": [
+                        {
+                            "headers": ["header1", "header2", ...],
+                            "rows": [
+                                ["value1", "value2", ...],
+                                ["value3", "value4", ...]
+                            ],
+                            "analysis": "Brief analysis of this table"
+                        }
+                    ],
+                    "overall_analysis": "Overall analysis of all tables found"
+                }"""
+
+                # Create completion with file
+                completion = self.client.generate_content(
+                    contents=[
+                        {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "text": prompt
+                                },
+                                {
+                                    "inline_data": {
+                                        "mime_type": file.content_type,
+                                        "data": base64.b64encode(file_content).decode('utf-8')
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    generation_config={
+                        "temperature": kwargs.get('temperature', 0.7),
+                        "max_output_tokens": kwargs.get('max_tokens', 2000)
+                    }
+                )
+                
+                result = completion.text
+                
+                # Parse the JSON response
+                try:
+                    parsed_result = json.loads(result)
+                    return {
+                        "table_data": parsed_result.get("tables", []),
+                        "analysis": parsed_result.get("overall_analysis", "")
+                    }
+                except json.JSONDecodeError:
+                    raise Exception("AI response could not be parsed as valid JSON")
+
+        except Exception as e:
+            raise Exception(f"Error processing file with Gemini: {str(e)}")
+        finally:
+            # Clean up temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except Exception as e:
+                    logger.error(f"Error cleaning up temporary file: {str(e)}")

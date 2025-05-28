@@ -568,10 +568,10 @@ async def process_image(
         
     Returns:
         Dict containing:
-        - tables: List of detected tables with their coordinates and content
-        - text: Extracted text from the image
-        - analysis: Overall image analysis
-        - image_metadata: Basic metadata about the image (dimensions, format, etc.)
+            - tables: List of detected tables with their coordinates and content
+            - text: Extracted text from the image
+            - analysis: Overall image analysis
+            - image_metadata: Basic metadata about the image (dimensions, format, etc.)
     """
     try:
         # Validate file type
@@ -601,6 +601,52 @@ async def process_image(
         raise HTTPException(
             status_code=500,
             detail=f"Error processing image: {str(e)}"
+        )
+
+
+@app.post("/process-table-by-ai")
+@handle_ai_errors
+async def process_table_by_ai(
+    file: UploadFile = File(...),
+    provider: str = Query("xai", description="AI provider to use"),
+    model: Optional[str] = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000
+):
+    """
+    Process any file using AI to extract table data.
+    
+    Args:
+        file: The file to process (supports any file type)
+        provider: The AI provider to use (xai, openai, gemini)
+        model: Optional model name to use
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        Dict containing:
+            - table_data: Extracted table data as JSON array
+            - analysis: Overall analysis of the document
+    """
+    try:
+        # Initialize processor with specified provider
+        processor = AIProcessor(provider=provider)
+        
+        # Process the file using the provider's process_table_by_ai method
+        result = await processor.provider.process_table_by_ai(
+            file,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing file: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing file: {str(e)}"
         )
 
 

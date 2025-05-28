@@ -104,3 +104,18 @@ class BaseAIProvider(ABC):
                 - image_metadata: Basic metadata about the image (dimensions, format, etc.)
         """
         pass
+
+    @abstractmethod
+    async def process_table_by_ai(self, file: UploadFile, **kwargs) -> Dict[str, Any]:
+        """Process any file using AI to extract table data.
+        
+        Args:
+            file: The file to process (supports any file type)
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - table_data: Extracted table data as JSON array
+                - analysis: Overall analysis of the document
+        """
+        pass

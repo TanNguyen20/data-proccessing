@@ -1,5 +1,6 @@
 .qodo
 .env
+.idea
 
 # Python cache files and directories
 __pycache__/
