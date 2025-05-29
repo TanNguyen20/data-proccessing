@@ -629,24 +629,31 @@ async def process_table_by_ai(
             - analysis: Overall analysis of the document
     """
     try:
-        # Initialize processor with specified provider
+        # Initialize the AI processor
         processor = AIProcessor(provider=provider)
-        
-        # Process the file using the provider's process_table_by_ai method
-        result = await processor.provider.process_table_by_ai(
-            file,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        
-        return result
+
+        # Prepare kwargs for the processor
+        kwargs = {
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+
+        # Process the file using AI
+        result = await processor.provider.process_table_by_ai(file, **kwargs)
+
+        return {
+            "table_data": result.get('table_data', []),
+            "analysis": result.get('analysis', ''),
+            "filename": file.filename,
+            "processed_at": datetime.utcnow().isoformat()
+        }
 
     except Exception as e:
-        logger.error(f"Error processing file: {str(e)}")
+        logger.error(f"Error processing table from file: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing file: {str(e)}"
+            detail=f"Error processing table from file: {str(e)}"
         )
 
 
