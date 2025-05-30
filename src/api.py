@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import List, Dict, Any, Optional
 
@@ -651,6 +651,68 @@ async def process_table_by_ai(
 
     except Exception as e:
         logger.error(f"Error processing table from file: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing table from file: {str(e)}"
+        )
+
+
+@app.post("/process-table-by-ai-file-from-openai")
+@handle_ai_errors
+async def process_table_by_ai_file_from_openai(
+    file: UploadFile = File(...),
+    provider: str = Query("openai", description="AI provider to use"),
+    model: Optional[str] = None,
+    temperature: float = 0.2,
+    max_tokens: int = 4000
+):
+    """
+    Process any file using OpenAI's file upload functionality to extract table data.
+    
+    Args:
+        file: The file to process (supports any file type)
+        provider: The AI provider to use (must be 'openai')
+        model: Optional model name to use
+        temperature: Temperature for the AI model (0.0 to 1.0)
+        max_tokens: Maximum number of tokens to generate
+        
+    Returns:
+        Dict containing:
+            - table_data: Extracted table data as JSON array
+            - analysis: Overall analysis of the document
+            - filename: Original filename
+            - processed_at: Timestamp of processing
+    """
+    try:
+        # Validate provider
+        if provider.lower() != "openai":
+            raise HTTPException(
+                status_code=400,
+                detail="This endpoint only supports the OpenAI provider"
+            )
+
+        # Initialize the AI processor
+        processor = AIProcessor(provider=provider)
+
+        # Prepare kwargs for the processor
+        kwargs = {
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+
+        # Process the file using OpenAI's file upload functionality
+        result = await processor.provider.process_table_by_ai_file_from_openai(file, **kwargs)
+
+        return {
+            "table_data": result.get('table_data', []),
+            "analysis": result.get('analysis', ''),
+            "filename": file.filename,
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing table from file using OpenAI file upload: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Error processing table from file: {str(e)}"

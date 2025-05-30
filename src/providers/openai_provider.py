@@ -1253,3 +1253,185 @@ Format the response in a clear, structured way."""
 
         except Exception as e:
             raise Exception(f"Error processing file with OpenAI: {str(e)}")
+
+    async def process_table_by_ai_file_from_openai(self, file: UploadFile = File(...), **kwargs) -> Dict[str, Any]:
+        """Process any file using OpenAI's file upload functionality to extract table data.
+        
+        Args:
+            file: The file to process (supports any file type)
+            **kwargs: Additional arguments like model, temperature, etc.
+            
+        Returns:
+            Dict containing:
+                - table_data: Extracted table data as JSON array
+                - analysis: Overall analysis of the document
+        """
+        temp_file_path = None
+        try:
+            # Create a temporary file with original extension
+            suffix = os.path.splitext(file.filename)[1] or ".tmp"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                content = await file.read()
+                tmp.write(content)
+                temp_file_path = tmp.name
+
+            # Upload file to OpenAI
+            with open(temp_file_path, "rb") as file_to_upload:
+                uploaded_file = self.client.files.create(
+                    file=file_to_upload,
+                    purpose="user_data"
+                )
+
+            # Create system prompt for table extraction
+            system_prompt = """You are a data extraction expert. Your task is to:
+            1. Extract any tables from the provided file
+            2. Format the table data as a JSON array
+            3. Each object in the array should represent a row with column headers as keys
+            4. Provide a brief analysis of the extracted data
+            5. Return ONLY valid JSON data with no additional text or formatting
+            
+            IMPORTANT: 
+            - Your response must be ONLY the JSON data, properly formatted and escaped
+            - The response must be a complete JSON array
+            - Do not truncate or omit any data
+            - Ensure all JSON arrays are properly closed
+            - Include all extracted data in the response"""
+
+            # Create user prompt
+            user_prompt = f"""Please extract all tables from this file and format them as JSON.
+            File: {file.filename}
+            
+            Return the data in this exact format:
+            {{
+                "tables": [
+                    {{
+                        "headers": ["column1", "column2", ...],
+                        "rows": [
+                            {{"column1": "value1", "column2": "value2", ...}},
+                            ...
+                        ]
+                    }},
+                    ...
+                ],
+                "analysis": "Brief analysis of the extracted data"
+            }}
+
+            IMPORTANT:
+            - Return the complete JSON array with all data
+            - Do not truncate or omit any rows
+            - Ensure all arrays are properly closed
+            - Include all extracted data"""
+
+            # Create chat completion with the file
+            response = self.client.chat.completions.create(
+                model=kwargs.get('model', OPENAI_DEFAULT_MODEL),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "file",
+                                "file": {
+                                    "file_id": uploaded_file.id,
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": user_prompt
+                            }
+                        ]
+                    }
+                ],
+                temperature=kwargs.get('temperature', 0.2),
+                max_tokens=kwargs.get('max_tokens', 4000),
+                response_format={"type": "json_object"}
+            )
+
+            try:
+                # Parse the response
+                content = response.choices[0].message.content.strip()
+                
+                # Clean up the content
+                content = re.sub(r'^```json\s*|\s*```$', '', content)
+                content = content.replace('\n', ' ').replace('\r', '')
+                content = re.sub(r',\s*]', ']', content)
+                content = re.sub(r'\s+', ' ', content)
+
+                # Ensure we have a complete JSON object
+                if not content.startswith('{'):
+                    json_start = content.find('{')
+                    json_end = content.rfind('}')
+                    if json_start != -1 and json_end != -1:
+                        content = content[json_start:json_end + 1]
+
+                # Parse the JSON
+                result = json.loads(content)
+
+                # Validate the response structure
+                if not isinstance(result, dict):
+                    raise ValueError("Response is not a valid JSON object")
+
+                if 'tables' not in result:
+                    raise ValueError("Response missing 'tables' key")
+
+                if not isinstance(result['tables'], list):
+                    raise ValueError("'tables' is not a valid array")
+
+                # Extract and validate table data
+                table_data = []
+                for table in result.get('tables', []):
+                    if not isinstance(table, dict):
+                        continue
+
+                    headers = table.get('headers', [])
+                    if not isinstance(headers, list):
+                        continue
+
+                    rows = table.get('rows', [])
+                    if not isinstance(rows, list):
+                        continue
+
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+
+                        # Ensure all headers are present in the row
+                        row_data = {}
+                        for header in headers:
+                            row_data[header] = str(row.get(header, '')).strip()
+                        table_data.append(row_data)
+
+                # Validate we have data
+                if not table_data:
+                    raise ValueError("No valid table data found in response")
+
+                return {
+                    "table_data": table_data,
+                    "analysis": result.get('analysis', '')
+                }
+
+            except json.JSONDecodeError as e:
+                # If JSON parsing fails, try to extract JSON from the text
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group(0))
+                        return {
+                            "table_data": result.get('tables', []),
+                            "analysis": result.get('analysis', '')
+                        }
+                    except json.JSONDecodeError:
+                        raise ValueError(f"Could not parse JSON from response: {str(e)}")
+                else:
+                    raise ValueError("No valid JSON found in response")
+
+        except Exception as e:
+            raise Exception(f"Error processing file with OpenAI: {str(e)}")
+        finally:
+            # Clean up temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except Exception as e:
+                    logger.error(f"Error cleaning up temporary file: {str(e)}")
