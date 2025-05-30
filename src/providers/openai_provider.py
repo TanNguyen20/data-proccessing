@@ -1108,7 +1108,7 @@ Format the response in a clear, structured way."""
             # Create system prompt for table extraction
             system_prompt = """You are a data extraction expert. Your task is to:
             1. Extract any tables from the provided file
-            2. Format the table data as a JSON array
+            2. Format the table data as a JSON array where each object has keys matching the header names
             3. Each object in the array should represent a row with column headers as keys
             4. Provide a brief analysis of the extracted data
             5. Return ONLY valid JSON data with no additional text or formatting
@@ -1127,14 +1127,9 @@ Format the response in a clear, structured way."""
             
             Return the data in this exact format:
             {{
-                "tables": [
-                    {{
-                        "headers": ["column1", "column2", ...],
-                        "rows": [
-                            {{"column1": "value1", "column2": "value2", ...}},
-                            ...
-                        ]
-                    }},
+                "table_data": [
+                    {{"header1": "value1", "header2": "value2", ...}},
+                    {{"header1": "value3", "header2": "value4", ...}},
                     ...
                 ],
                 "analysis": "Brief analysis of the extracted data"
@@ -1144,7 +1139,8 @@ Format the response in a clear, structured way."""
             - Return the complete JSON array with all data
             - Do not truncate or omit any rows
             - Ensure all arrays are properly closed
-            - Include all extracted data"""
+            - Include all extracted data
+            - Use the actual header names from the table as keys"""
 
             # Call OpenAI API
             response = self.client.chat.completions.create(
@@ -1197,35 +1193,18 @@ Format the response in a clear, structured way."""
                 if not isinstance(result, dict):
                     raise ValueError("Response is not a valid JSON object")
 
-                if 'tables' not in result:
-                    raise ValueError("Response missing 'tables' key")
+                if 'table_data' not in result:
+                    raise ValueError("Response missing 'table_data' key")
 
-                if not isinstance(result['tables'], list):
-                    raise ValueError("'tables' is not a valid array")
+                if not isinstance(result['table_data'], list):
+                    raise ValueError("'table_data' is not a valid array")
 
                 # Extract and validate table data
                 table_data = []
-                for table in result.get('tables', []):
-                    if not isinstance(table, dict):
+                for row in result.get('table_data', []):
+                    if not isinstance(row, dict):
                         continue
-
-                    headers = table.get('headers', [])
-                    if not isinstance(headers, list):
-                        continue
-
-                    rows = table.get('rows', [])
-                    if not isinstance(rows, list):
-                        continue
-
-                    for row in rows:
-                        if not isinstance(row, dict):
-                            continue
-
-                        # Ensure all headers are present in the row
-                        row_data = {}
-                        for header in headers:
-                            row_data[header] = str(row.get(header, '')).strip()
-                        table_data.append(row_data)
+                    table_data.append(row)
 
                 # Validate we have data
                 if not table_data:
@@ -1285,7 +1264,7 @@ Format the response in a clear, structured way."""
             # Create system prompt for table extraction
             system_prompt = """You are a data extraction expert. Your task is to:
             1. Extract any tables from the provided file
-            2. Format the table data as a JSON array
+            2. Format the table data as a JSON array where each object has keys matching the header names
             3. Each object in the array should represent a row with column headers as keys
             4. Provide a brief analysis of the extracted data
             5. Return ONLY valid JSON data with no additional text or formatting
@@ -1303,14 +1282,9 @@ Format the response in a clear, structured way."""
             
             Return the data in this exact format:
             {{
-                "tables": [
-                    {{
-                        "headers": ["column1", "column2", ...],
-                        "rows": [
-                            {{"column1": "value1", "column2": "value2", ...}},
-                            ...
-                        ]
-                    }},
+                "table_data": [
+                    {{"header1": "value1", "header2": "value2", ...}},
+                    {{"header1": "value3", "header2": "value4", ...}},
                     ...
                 ],
                 "analysis": "Brief analysis of the extracted data"
@@ -1320,7 +1294,8 @@ Format the response in a clear, structured way."""
             - Return the complete JSON array with all data
             - Do not truncate or omit any rows
             - Ensure all arrays are properly closed
-            - Include all extracted data"""
+            - Include all extracted data
+            - Use the actual header names from the table as keys"""
 
             # Create chat completion with the file
             response = self.client.chat.completions.create(
@@ -1372,35 +1347,18 @@ Format the response in a clear, structured way."""
                 if not isinstance(result, dict):
                     raise ValueError("Response is not a valid JSON object")
 
-                if 'tables' not in result:
-                    raise ValueError("Response missing 'tables' key")
+                if 'table_data' not in result:
+                    raise ValueError("Response missing 'table_data' key")
 
-                if not isinstance(result['tables'], list):
-                    raise ValueError("'tables' is not a valid array")
+                if not isinstance(result['table_data'], list):
+                    raise ValueError("'table_data' is not a valid array")
 
                 # Extract and validate table data
                 table_data = []
-                for table in result.get('tables', []):
-                    if not isinstance(table, dict):
+                for row in result.get('table_data', []):
+                    if not isinstance(row, dict):
                         continue
-
-                    headers = table.get('headers', [])
-                    if not isinstance(headers, list):
-                        continue
-
-                    rows = table.get('rows', [])
-                    if not isinstance(rows, list):
-                        continue
-
-                    for row in rows:
-                        if not isinstance(row, dict):
-                            continue
-
-                        # Ensure all headers are present in the row
-                        row_data = {}
-                        for header in headers:
-                            row_data[header] = str(row.get(header, '')).strip()
-                        table_data.append(row_data)
+                    table_data.append(row)
 
                 # Validate we have data
                 if not table_data:
