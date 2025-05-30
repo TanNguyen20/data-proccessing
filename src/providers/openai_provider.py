@@ -1113,7 +1113,12 @@ Format the response in a clear, structured way."""
             4. Provide a brief analysis of the extracted data
             5. Return ONLY valid JSON data with no additional text or formatting
             
-            IMPORTANT: Your response must be ONLY the JSON data, properly formatted and escaped."""
+            IMPORTANT: 
+            - Your response must be ONLY the JSON data, properly formatted and escaped
+            - The response must be a complete JSON array
+            - Do not truncate or omit any data
+            - Ensure all JSON arrays are properly closed
+            - Include all extracted data in the response"""
 
             # Create user prompt
             user_prompt = f"""Please extract all tables from this file and format them as JSON.
@@ -1133,7 +1138,13 @@ Format the response in a clear, structured way."""
                     ...
                 ],
                 "analysis": "Brief analysis of the extracted data"
-            }}"""
+            }}
+
+            IMPORTANT:
+            - Return the complete JSON array with all data
+            - Do not truncate or omit any rows
+            - Ensure all arrays are properly closed
+            - Include all extracted data"""
 
             # Call OpenAI API
             response = self.client.chat.completions.create(
@@ -1165,50 +1176,80 @@ Format the response in a clear, structured way."""
             try:
                 # Parse the response
                 content = response.choices[0].message.content.strip()
+                
+                # Clean up the content
                 content = re.sub(r'^```json\s*|\s*```$', '', content)
                 content = content.replace('\n', ' ').replace('\r', '')
                 content = re.sub(r',\s*]', ']', content)
                 content = re.sub(r'\s+', ' ', content)
 
+                # Ensure we have a complete JSON object
                 if not content.startswith('{'):
                     json_start = content.find('{')
                     json_end = content.rfind('}')
                     if json_start != -1 and json_end != -1:
                         content = content[json_start:json_end + 1]
 
+                # Parse the JSON
                 result = json.loads(content)
 
-                # Extract table data and analysis
+                # Validate the response structure
+                if not isinstance(result, dict):
+                    raise ValueError("Response is not a valid JSON object")
+
+                if 'tables' not in result:
+                    raise ValueError("Response missing 'tables' key")
+
+                if not isinstance(result['tables'], list):
+                    raise ValueError("'tables' is not a valid array")
+
+                # Extract and validate table data
                 table_data = []
                 for table in result.get('tables', []):
+                    if not isinstance(table, dict):
+                        continue
+
                     headers = table.get('headers', [])
-                    for row in table.get('rows', []):
+                    if not isinstance(headers, list):
+                        continue
+
+                    rows = table.get('rows', [])
+                    if not isinstance(rows, list):
+                        continue
+
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+
                         # Ensure all headers are present in the row
                         row_data = {}
                         for header in headers:
                             row_data[header] = str(row.get(header, '')).strip()
                         table_data.append(row_data)
 
+                # Validate we have data
+                if not table_data:
+                    raise ValueError("No valid table data found in response")
+
                 return {
                     "table_data": table_data,
                     "analysis": result.get('analysis', '')
                 }
 
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 # If JSON parsing fails, try to extract JSON from the text
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
-                    result = json.loads(json_match.group(0))
-                    return {
-                        "table_data": result.get('tables', []),
-                        "analysis": result.get('analysis', '')
-                    }
+                    try:
+                        result = json.loads(json_match.group(0))
+                        return {
+                            "table_data": result.get('tables', []),
+                            "analysis": result.get('analysis', '')
+                        }
+                    except json.JSONDecodeError:
+                        raise ValueError(f"Could not parse JSON from response: {str(e)}")
                 else:
-                    # If no JSON found, return empty result
-                    return {
-                        "table_data": [],
-                        "analysis": "Could not parse structured data from response"
-                    }
+                    raise ValueError("No valid JSON found in response")
 
         except Exception as e:
             raise Exception(f"Error processing file with OpenAI: {str(e)}")
