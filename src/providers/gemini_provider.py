@@ -1074,11 +1074,7 @@ Format the response in a clear, structured way."""
                 model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
                 response = self.client.models.generate_content(
                     model=model_name,
-                    contents=[prompt, uploaded_file],
-                    config=types.GenerationConfig(
-                        temperature=kwargs.get('temperature', 0.7),
-                        max_output_tokens=kwargs.get('max_tokens', 2000)
-                    )
+                    contents=[prompt, uploaded_file]
                 )
 
                 # Parse the JSON response
