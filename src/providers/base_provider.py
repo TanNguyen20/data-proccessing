@@ -109,13 +109,36 @@ class BaseAIProvider(ABC):
     async def process_table_by_ai(self, file: UploadFile, **kwargs) -> Dict[str, Any]:
         """Process any file using AI to extract table data.
         
+        This method supports two approaches for processing files:
+        1. Direct file processing: The file content is processed directly by the AI model
+        2. File upload approach: The file is uploaded to the AI provider's system first (e.g., OpenAI's file upload API)
+        
         Args:
             file: The file to process (supports any file type)
-            **kwargs: Additional arguments like model, temperature, etc.
+            **kwargs: Additional arguments like:
+                - model: Optional model name to use
+                - temperature: Temperature for the AI model (0.0 to 1.0)
+                - max_tokens: Maximum number of tokens to generate
+                - use_file_upload: Optional boolean to force using file upload approach if supported
             
         Returns:
             Dict containing:
-                - table_data: Extracted table data as JSON array
-                - analysis: Overall analysis of the document
+                - table_data: List of extracted table rows, where each row is a dictionary
+                  with column headers as keys and cell values as values
+                - analysis: Overall analysis of the document content
+                
+        The table_data structure will be:
+        [
+            {
+                "column1": "value1",
+                "column2": "value2",
+                ...
+            },
+            ...
+        ]
+        
+        Raises:
+            ValueError: If the response is not properly formatted or missing required data
+            Exception: For any other processing errors
         """
         pass

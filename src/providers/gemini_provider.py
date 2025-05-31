@@ -5,8 +5,10 @@ import re
 import tempfile
 from typing import Any, Dict, List, Tuple
 from urllib.parse import urlparse
+from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import numpy as np
 import pandas as pd
 import pdfplumber
@@ -32,11 +34,8 @@ class GeminiProvider(BaseAIProvider):
             if not GEMINI_API_KEY:
                 raise ValueError("Gemini API key not found in environment variables")
 
-            # Configure the Gemini API
-            genai.configure(api_key=GEMINI_API_KEY)
-            
-            # Initialize the model
-            self.client = genai.GenerativeModel('gemini-pro')
+            # Initialize the Gemini client with new SDK
+            self.client = genai.Client(api_key=GEMINI_API_KEY)
             
         except Exception as e:
             raise Exception(f"Error initializing Gemini client: {str(e)}")
@@ -51,8 +50,8 @@ class GeminiProvider(BaseAIProvider):
             Exception: If there's an error fetching models from Gemini API
         """
         try:
-            # Get available models
-            models = genai.list_models()
+            # Get available models using new SDK
+            models = self.client.models.list()
             return [model.name for model in models if 'gemini' in model.name.lower()]
 
         except Exception as e:
@@ -149,11 +148,11 @@ class GeminiProvider(BaseAIProvider):
 
             # Use the Gemini model to analyze the data
             model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
-            model = genai.GenerativeModel(model_name)
-
-            response = model.generate_content(
-                full_prompt,
-                generation_config=genai.types.GenerationConfig(
+            
+            response = self.client.models.generate_content(
+                model=model_name,
+                contents=full_prompt,
+                config=types.GenerationConfig(
                     temperature=kwargs.get('temperature', 0.7),
                     max_output_tokens=kwargs.get('max_tokens', 1000)
                 )
@@ -339,7 +338,7 @@ class GeminiProvider(BaseAIProvider):
 
                 response = model.generate_content(
                     full_prompt,
-                    generation_config=genai.types.GenerationConfig(
+                    config=types.GenerationConfig(
                         temperature=kwargs.get('temperature', 0.7),
                         max_output_tokens=kwargs.get('max_tokens', 1000)
                     )
@@ -433,7 +432,8 @@ class GeminiProvider(BaseAIProvider):
                         continue
 
             # Get overall analysis using Gemini
-            model = genai.GenerativeModel(kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL)
+            model_name = kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL
+            
             analysis_prompt = """Analyze this document and provide:
             1. A summary of the key information
             2. Any patterns or trends identified
@@ -444,9 +444,10 @@ class GeminiProvider(BaseAIProvider):
             Document content:
             """ + full_text
 
-            analysis_response = model.generate_content(
-                analysis_prompt,
-                generation_config=genai.types.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=model_name,
+                contents=analysis_prompt,
+                config=types.GenerationConfig(
                     temperature=kwargs.get('temperature', 0.7),
                     max_output_tokens=kwargs.get('max_tokens', 1000)
                 )
@@ -454,7 +455,7 @@ class GeminiProvider(BaseAIProvider):
 
             return {
                 "table_data": all_table_data,
-                "analysis": analysis_response.text,
+                "analysis": response.text,
                 "page_count": len(pdf.pages),
                 "row_count": len(all_table_data),
                 "headers_by_page": page_headers
@@ -571,7 +572,7 @@ class GeminiProvider(BaseAIProvider):
             model = genai.GenerativeModel(kwargs.get('model') if kwargs.get('model') else GEMINI_DEFAULT_MODEL)
             response = model.generate_content(
                 prompt,
-                generation_config=genai.types.GenerationConfig(
+                config=types.GenerationConfig(
                     temperature=0.1,  # Very low temperature for consistent formatting
                     max_output_tokens=kwargs.get('max_tokens', 4000)
                 )
@@ -776,11 +777,11 @@ class GeminiProvider(BaseAIProvider):
         """
         try:
             model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
-            model = genai.GenerativeModel(model_name)
-
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            
+            response = self.client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerationConfig(
                     temperature=kwargs.get('temperature', 0.7),
                     max_output_tokens=kwargs.get('max_tokens', 1000)
                 )
@@ -901,7 +902,7 @@ Format the response in a clear, structured way."""
 
                     response = model.generate_content(
                         prompt,
-                        generation_config=genai.types.GenerationConfig(
+                        config=types.GenerationConfig(
                             temperature=kwargs.get('temperature', 0.7),
                             max_output_tokens=kwargs.get('max_tokens', 1000)
                         )
@@ -975,7 +976,6 @@ Format the response in a clear, structured way."""
 
             # Initialize the model
             model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
-            model = genai.GenerativeModel(model_name)
 
             # Create the image part
             image_part = {
@@ -984,9 +984,10 @@ Format the response in a clear, structured way."""
             }
 
             # Generate content with the image
-            response = model.generate_content(
-                [prompt, image_part],
-                generation_config=genai.types.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=model_name,
+                contents=[prompt, image_part],
+                config=types.GenerationConfig(
                     temperature=kwargs.get('temperature', 0.2),
                     max_output_tokens=kwargs.get('max_tokens', 2000)
                 )
@@ -1029,83 +1030,78 @@ Format the response in a clear, structured way."""
                 - table_data: Extracted table data as JSON array
                 - analysis: Overall analysis of the document
         """
-        temp_file_path = None
+        uploaded_file = None
         try:
-            # Save file temporarily
+            # Save file temporarily to handle it with genai
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
                 content = await file.read()
                 temp_file.write(content)
                 temp_file_path = temp_file.name
 
-            # Read file content for Gemini
-            with open(temp_file_path, "rb") as file_to_upload:
-                file_content = file_to_upload.read()
-                
+            try:
                 # Create the prompt for table extraction
-                prompt = """Please analyze this file and extract any tables present in it.
-                For each table found:
-                1. Identify the headers
-                2. Extract the data rows
-                3. Format the data as a JSON array
-                4. Provide a brief analysis of the table content
+                prompt = """You are a data extraction expert. Your task is to:
+                1. Extract any tables from the provided file
+                2. Format the table data as a JSON array where each object has keys matching the header names
+                3. Each object in the array should represent a row with column headers as keys
+                4. Provide a brief analysis of the extracted data
+                5. Return ONLY valid JSON data with no additional text or formatting
                 
-                Return ONLY a valid JSON object in this exact format:
+                IMPORTANT: 
+                - Your response must be ONLY the JSON data, properly formatted and escaped
+                - The response must be a complete JSON array
+                - Do not truncate or omit any data
+                - Ensure all JSON arrays are properly closed
+                - Include all extracted data in the response
+
+                Return the data in this exact format:
                 {
-                    "tables": [
-                        {
-                            "headers": ["header1", "header2", ...],
-                            "rows": [
-                                ["value1", "value2", ...],
-                                ["value3", "value4", ...]
-                            ],
-                            "analysis": "Brief analysis of this table"
-                        }
+                    "table_data": [
+                        {"header1": "value1", "header2": "value2", ...},
+                        {"header1": "value3", "header2": "value4", ...},
+                        ...
                     ],
-                    "overall_analysis": "Overall analysis of all tables found"
+                    "analysis": "Brief analysis of the extracted data"
                 }"""
 
-                # Create completion with file
-                completion = self.client.generate_content(
-                    contents=[
-                        {
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "text": prompt
-                                },
-                                {
-                                    "inline_data": {
-                                        "mime_type": file.content_type,
-                                        "data": base64.b64encode(file_content).decode('utf-8')
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    generation_config={
-                        "temperature": kwargs.get('temperature', 0.7),
-                        "max_output_tokens": kwargs.get('max_tokens', 2000)
-                    }
+                # Upload the file using genai client
+                uploaded_file = self.client.files.upload(file=Path(temp_file_path))
+
+                # Generate content using the model
+                model_name = kwargs.get('model', GEMINI_DEFAULT_MODEL)
+                response = self.client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt, uploaded_file],
                 )
-                
-                result = completion.text
-                
+
                 # Parse the JSON response
                 try:
-                    parsed_result = json.loads(result)
+                    parsed_result = json.loads(response.text)
                     return {
-                        "table_data": parsed_result.get("tables", []),
-                        "analysis": parsed_result.get("overall_analysis", "")
+                        "table_data": parsed_result.get("table_data", []),
+                        "analysis": parsed_result.get("analysis", "")
                     }
                 except json.JSONDecodeError:
-                    raise Exception("AI response could not be parsed as valid JSON")
+                    # If JSON parsing fails, try to extract JSON from the text
+                    json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                    if json_match:
+                        parsed_result = json.loads(json_match.group(0))
+                        return {
+                            "table_data": parsed_result.get("table_data", []),
+                            "analysis": parsed_result.get("analysis", "")
+                        }
+                    else:
+                        raise Exception("AI response could not be parsed as valid JSON")
+
+            finally:
+                # Clean up temporary file
+                if uploaded_file is not None:
+                    self.client.files.delete(name=uploaded_file.name)
+                if os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                    except Exception as e:
+                        logger.error(f"Error cleaning up temporary file: {str(e)}")
 
         except Exception as e:
             raise Exception(f"Error processing file with Gemini: {str(e)}")
-        finally:
-            # Clean up temporary file
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                except Exception as e:
-                    logger.error(f"Error cleaning up temporary file: {str(e)}")
