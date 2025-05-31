@@ -1246,6 +1246,7 @@ Format the response in a clear, structured way."""
                 - analysis: Overall analysis of the document
         """
         temp_file_path = None
+        uploaded_file = None
         try:
             # Create a temporary file with original extension
             suffix = os.path.splitext(file.filename)[1] or ".tmp"
@@ -1388,6 +1389,11 @@ Format the response in a clear, structured way."""
             raise Exception(f"Error processing file with OpenAI: {str(e)}")
         finally:
             # Clean up temporary file
+            if uploaded_file is not None:
+                try:
+                    self.client.files.delete(uploaded_file.id)
+                except:
+                    pass
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.unlink(temp_file_path)

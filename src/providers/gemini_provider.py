@@ -1095,8 +1095,6 @@ Format the response in a clear, structured way."""
 
             finally:
                 # Clean up temporary file
-                if uploaded_file is not None:
-                    self.client.files.delete(name=uploaded_file.name)
                 if os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
@@ -1105,3 +1103,7 @@ Format the response in a clear, structured way."""
 
         except Exception as e:
             raise Exception(f"Error processing file with Gemini: {str(e)}")
+        finally:
+            # cleanup file after uploading it
+            if uploaded_file is not None:
+                self.client.files.delete(name=uploaded_file.name)
