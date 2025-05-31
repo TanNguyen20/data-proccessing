@@ -16,6 +16,8 @@ import requests
 from fastapi import UploadFile
 import base64
 
+from google.genai.types import HttpOptions
+
 from .base_provider import BaseAIProvider
 from ..config import GEMINI_API_KEY, GEMINI_DEFAULT_MODEL
 
@@ -35,7 +37,8 @@ class GeminiProvider(BaseAIProvider):
                 raise ValueError("Gemini API key not found in environment variables")
 
             # Initialize the Gemini client with new SDK
-            self.client = genai.Client(api_key=GEMINI_API_KEY)
+            self.client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(timeout=3 * 60 * 1000))
+
             
         except Exception as e:
             raise Exception(f"Error initializing Gemini client: {str(e)}")
@@ -1072,6 +1075,10 @@ Format the response in a clear, structured way."""
                 response = self.client.models.generate_content(
                     model=model_name,
                     contents=[prompt, uploaded_file],
+                    config=types.GenerationConfig(
+                        temperature=kwargs.get('temperature', 0.7),
+                        max_output_tokens=kwargs.get('max_tokens', 2000)
+                    )
                 )
 
                 # Parse the JSON response
